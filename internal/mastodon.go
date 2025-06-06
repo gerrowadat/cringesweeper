@@ -13,8 +13,8 @@ import (
 
 // MastodonClient implements the SocialClient interface for Mastodon
 type MastodonClient struct {
-	creds          *Credentials
-	instanceURL    string
+	creds               *Credentials
+	instanceURL         string
 	authenticatedClient *http.Client
 }
 
@@ -318,7 +318,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	// Parse username to get instance URL  
+	// Parse username to get instance URL
 	instanceURL, _, err := c.parseUsername(username)
 	if err != nil {
 		return nil, fmt.Errorf("invalid username format: %w", err)
@@ -551,12 +551,12 @@ func (c *MastodonClient) createAuthenticatedRequest(method, url string, body io.
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if c.creds != nil && c.creds.AccessToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	return req, nil
 }
 

@@ -151,8 +151,8 @@ func (c *BlueskyClient) fetchBlueskyPosts(username string, limit int) ([]bluesky
 	params := url.Values{}
 	params.Add("actor", username)
 	params.Add("limit", fmt.Sprintf("%d", limit))
-	params.Add("include_pins", "true")    // Include pinned posts
-	params.Add("filter", "posts_no_replies") // Only get posts and reposts, not replies to avoid confusion
+	params.Add("include_pins", "true")         // Include pinned posts
+	params.Add("filter", "posts_with_replies") // Get user's own posts and replies
 
 	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
@@ -234,6 +234,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 		} else {
 			posts = append(posts, likedPosts...)
 		}
+	}
+
+	// Always fetch the user's repost records separately to ensure we get the correct repost URIs
+	repostPosts, err := c.fetchRepostPosts(session, 100)
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to fetch repost records: %v\n", err)
+	} else {
+		posts = append(posts, repostPosts...)
 	}
 
 	result := &PruneResult{
@@ -373,7 +381,7 @@ func (c *BlueskyClient) invalidateSession() {
 // ensureValidSession ensures we have a valid session, creating/refreshing as needed
 func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionResponse, error) {
 	// If we don't have a session or credentials changed, create new session
-	if c.session == nil || c.creds == nil || 
+	if c.session == nil || c.creds == nil ||
 		c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword {
 		if c.creds != nil && (c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword) {
 			fmt.Printf("🔄 Credentials changed, creating new Bluesky session...\n")
@@ -382,7 +390,7 @@ func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionRespo
 		}
 		return c.createNewSession(creds)
 	}
-	
+
 	// If session is expired or about to expire (within 5 minutes), try to refresh
 	if time.Now().After(c.sessionExp.Add(-5 * time.Minute)) {
 		fmt.Printf("🔄 Refreshing Bluesky session using refresh token...\n")
@@ -394,7 +402,7 @@ func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionRespo
 		}
 		return refreshedSession, nil
 	}
-	
+
 	// Reusing existing session
 	return c.session, nil
 }
@@ -440,7 +448,7 @@ func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
 
 	// Update stored session with new tokens
 	c.session = &refreshedSession
-	
+
 	// Try to parse actual expiration from refreshed JWT, fall back to 24 hours
 	if expTime, err := c.parseJWTExpiration(refreshedSession.AccessJwt); err == nil {
 		c.sessionExp = expTime
@@ -461,32 +469,32 @@ func (c *BlueskyClient) parseJWTExpiration(token string) (time.Time, error) {
 	if len(parts) != 3 {
 		return time.Time{}, fmt.Errorf("invalid JWT format")
 	}
-	
+
 	// Decode the payload (second part)
 	payload := parts[1]
 	// Add padding if necessary for base64 decoding
 	if len(payload)%4 != 0 {
 		payload += strings.Repeat("=", 4-len(payload)%4)
 	}
-	
+
 	decoded, err := base64.URLEncoding.DecodeString(payload)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to decode JWT payload: %w", err)
 	}
-	
+
 	var claims struct {
 		Exp int64 `json:"exp"` // Unix timestamp
 	}
-	
+
 	if err := json.Unmarshal(decoded, &claims); err != nil {
 		return time.Time{}, fmt.Errorf("failed to parse JWT claims: %w", err)
 	}
-	
+
 	if claims.Exp == 0 {
 		// No expiration in token, fall back to default
 		return time.Now().Add(24 * time.Hour), nil
 	}
-	
+
 	return time.Unix(claims.Exp, 0), nil
 }
 
@@ -496,14 +504,14 @@ func (c *BlueskyClient) createNewSession(creds *Credentials) (*atpSessionRespons
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Store session and credentials for reuse
 	c.session = session
 	c.creds = &Credentials{
 		Username:    creds.Username,
 		AppPassword: creds.AppPassword,
 	}
-	
+
 	// Try to parse actual expiration from JWT, fall back to 24 hours
 	if expTime, err := c.parseJWTExpiration(session.AccessJwt); err == nil {
 		c.sessionExp = expTime
@@ -513,7 +521,7 @@ func (c *BlueskyClient) createNewSession(creds *Credentials) (*atpSessionRespons
 		c.sessionExp = time.Now().Add(24 * time.Hour)
 		fmt.Printf("✅ Session created with default 24h expiration\n")
 	}
-	
+
 	return session, nil
 }
 
@@ -902,18 +910,18 @@ func (c *BlueskyClient) findRepostRecord(session *atpSessionResponse, postURI st
 // resolveDID attempts to resolve a DID to verify it exists and get current information
 func (c *BlueskyClient) resolveDID(did string) error {
 	resolveURL := fmt.Sprintf("https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=%s", did)
-	
+
 	resp, err := http.Get(resolveURL)
 	if err != nil {
 		return fmt.Errorf("failed to resolve DID %s: %w", did, err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("DID resolution failed for %s with status %d: %s", did, resp.StatusCode, string(body))
 	}
-	
+
 	return nil
 }
 
@@ -923,13 +931,79 @@ func (c *BlueskyClient) validatePostURI(postURI string, userDID string) error {
 	if len(parts) < 5 {
 		return fmt.Errorf("invalid post URI format: %s", postURI)
 	}
-	
+
 	postDID := parts[2]
 	if postDID != userDID {
 		return fmt.Errorf("post DID %s does not match authenticated user DID %s", postDID, userDID)
 	}
-	
+
 	return nil
+}
+
+// fetchRepostPosts fetches the user's own repost records
+func (c *BlueskyClient) fetchRepostPosts(session *atpSessionResponse, limit int) ([]Post, error) {
+	listURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords"
+
+	params := url.Values{}
+	params.Add("repo", session.DID)
+	params.Add("collection", "app.bsky.feed.repost")
+	params.Add("limit", fmt.Sprintf("%d", limit))
+
+	fullURL := fmt.Sprintf("%s?%s", listURL, params.Encode())
+
+	req, err := http.NewRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create list request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read list response: %w", err)
+	}
+
+	var listResponse struct {
+		Records []struct {
+			URI   string `json:"uri"`
+			Value struct {
+				Subject struct {
+					URI string `json:"uri"`
+				} `json:"subject"`
+				CreatedAt time.Time `json:"createdAt"`
+			} `json:"value"`
+		} `json:"records"`
+	}
+
+	if err := json.Unmarshal(body, &listResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse list response: %w", err)
+	}
+
+	var repostPosts []Post
+	for _, record := range listResponse.Records {
+		post := Post{
+			ID:        record.URI, // This is the repost record URI, not the original post
+			Type:      PostTypeRepost,
+			Platform:  "bluesky",
+			CreatedAt: record.Value.CreatedAt,
+			Content:   fmt.Sprintf("Reposted: %s", record.Value.Subject.URI), // Show what was reposted
+		}
+		repostPosts = append(repostPosts, post)
+	}
+
+	return repostPosts, nil
 }
 
 // fetchLikedPosts fetches posts that the user has liked
