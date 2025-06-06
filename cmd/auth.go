@@ -97,7 +97,7 @@ func setupBlueskyAuth() error {
 	fmt.Printf("export BLUESKY_USER=\"%s\"\n", username)
 	fmt.Printf("export BLUESKY_PASSWORD=\"%s\"\n", appPassword)
 	fmt.Println()
-	
+
 	// Optionally save to config file
 	fmt.Print("Would you like to save these credentials to ~/.config/cringesweeper? (y/n): ")
 	if askYesNo() {
@@ -117,7 +117,7 @@ func setupBlueskyAuth() error {
 			}
 		}
 	}
-	
+
 	fmt.Println("💡 Add the export commands to your shell profile (.bashrc, .zshrc, etc.) to persist them.")
 
 	return nil
@@ -184,7 +184,7 @@ func setupMastodonAuth() error {
 	fmt.Printf("export MASTODON_INSTANCE=\"%s\"\n", instanceURL)
 	fmt.Printf("export MASTODON_ACCESS_TOKEN=\"%s\"\n", accessToken)
 	fmt.Println()
-	
+
 	// Optionally save to config file
 	fmt.Print("Would you like to save these credentials to ~/.config/cringesweeper? (y/n): ")
 	if askYesNo() {
@@ -205,7 +205,7 @@ func setupMastodonAuth() error {
 			}
 		}
 	}
-	
+
 	fmt.Println("💡 Add the export commands to your shell profile (.bashrc, .zshrc, etc.) to persist them.")
 
 	return nil
@@ -253,7 +253,7 @@ func showCredentialStatus(platform string) {
 
 	// Get all supported platforms from the internal registry
 	supportedPlatforms := []string{"bluesky", "mastodon"}
-	
+
 	for i, p := range supportedPlatforms {
 		if i > 0 {
 			fmt.Println()
@@ -282,7 +282,7 @@ func showPlatformStatus(platform string) {
 		if creds.Instance != "" {
 			fmt.Printf("   Instance: %s\n", creds.Instance)
 		}
-		
+
 		// Validate credentials
 		if err := internal.ValidateCredentials(creds); err != nil {
 			fmt.Printf("⚠️  Credentials incomplete: %v\n", err)

@@ -52,7 +52,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 		// Use public fetch without viewer data
 		statuses, err = c.fetchUserStatuses(instanceURL, accountID, limit)
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch statuses: %w", err)
 	}
@@ -69,17 +69,17 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 			URL:       status.URL,
 			Type:      c.determinePostType(status),
 			Platform:  "mastodon",
-			
+
 			// Engagement metrics
 			RepostCount: status.ReblogsCount,
 			LikeCount:   status.FavouritesCount,
 			ReplyCount:  status.RepliesCount,
-			
+
 			// Viewer interaction status
 			IsLikedByUser: status.Favourited != nil && *status.Favourited,
 			IsPinned:      status.Pinned != nil && *status.Pinned,
 		}
-		
+
 		// Handle reblogs/reposts
 		if status.Reblog != nil {
 			post.Type = PostTypeRepost
@@ -98,7 +98,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 				Platform:  "mastodon",
 			}
 		}
-		
+
 		// Handle replies
 		if status.InReplyToID != nil {
 			post.Type = PostTypeReply
@@ -108,7 +108,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 				// For now, just store the ID
 			}
 		}
-		
+
 		posts = append(posts, post)
 	}
 
@@ -130,7 +130,7 @@ func (c *MastodonClient) parseUsername(username string) (instanceURL, acct strin
 		acct = username
 		instanceURL = "https://mastodon.social" // Default instance
 	}
-	
+
 	return instanceURL, acct, nil
 }
 
@@ -154,7 +154,7 @@ type mastodonStatus struct {
 	ReblogsCount       int             `json:"reblogs_count"`
 	FavouritesCount    int             `json:"favourites_count"`
 	RepliesCount       int             `json:"replies_count"`
-	
+
 	// Viewer interaction fields
 	Favourited *bool `json:"favourited,omitempty"` // Whether the authenticated user has favorited this status
 	Reblogged  *bool `json:"reblogged,omitempty"`  // Whether the authenticated user has reblogged this status
@@ -164,12 +164,12 @@ type mastodonStatus struct {
 // getAccountID looks up account ID by username
 func (c *MastodonClient) getAccountID(instanceURL, acct string) (string, error) {
 	lookupURL := fmt.Sprintf("%s/api/v1/accounts/lookup", instanceURL)
-	
+
 	params := url.Values{}
 	params.Add("acct", acct)
-	
+
 	fullURL := fmt.Sprintf("%s?%s", lookupURL, params.Encode())
-	
+
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to lookup account: %w", err)
@@ -197,14 +197,14 @@ func (c *MastodonClient) getAccountID(instanceURL, acct string) (string, error) 
 // fetchUserStatuses gets statuses for an account ID
 func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit int) ([]mastodonStatus, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
-	
+
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
 	params.Add("exclude_replies", "true")
 	params.Add("exclude_reblogs", "true")
-	
+
 	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
-	
+
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch statuses: %w", err)
@@ -232,22 +232,22 @@ func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit 
 // fetchUserStatusesAuthenticated gets statuses with viewer interaction data
 func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID string, limit int, creds *Credentials) ([]mastodonStatus, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
-	
+
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
 	params.Add("exclude_replies", "true")
 	params.Add("exclude_reblogs", "true")
-	
+
 	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
-	
+
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	// Add authentication header
 	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
-	
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -281,7 +281,7 @@ func (c *MastodonClient) stripHTML(content string) string {
 	result = strings.ReplaceAll(result, "<br/>", "\n")
 	result = strings.ReplaceAll(result, "<br />", "\n")
 	result = strings.ReplaceAll(result, "</p>", "\n")
-	
+
 	// Remove all other HTML tags (simple regex would be better)
 	for strings.Contains(result, "<") && strings.Contains(result, ">") {
 		start := strings.Index(result, "<")
@@ -291,7 +291,7 @@ func (c *MastodonClient) stripHTML(content string) string {
 		}
 		result = result[:start] + result[start+end+1:]
 	}
-	
+
 	return strings.TrimSpace(result)
 }
 
@@ -322,7 +322,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 	}
 
 	now := time.Now()
-	
+
 	for _, post := range posts {
 		shouldProcess := false
 		preserveReason := ""
@@ -409,7 +409,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 // deletePost deletes a Mastodon post
 func (c *MastodonClient) deletePost(creds *Credentials, postID string) error {
 	url := fmt.Sprintf("%s/api/v1/statuses/%s", creds.Instance, postID)
-	
+
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -436,7 +436,7 @@ func (c *MastodonClient) deletePost(creds *Credentials, postID string) error {
 // unlikePost unlikes (unfavourites) a Mastodon post
 func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unfavourite", creds.Instance, postID)
-	
+
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -463,7 +463,7 @@ func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
 // unreblogPost unreblogs (unshares) a Mastodon post
 func (c *MastodonClient) unreblogPost(creds *Credentials, postID string) error {
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unreblog", creds.Instance, postID)
-	
+
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)

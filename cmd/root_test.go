@@ -40,7 +40,7 @@ func TestRootCommand(t *testing.T) {
 				t.Errorf("Execute() panicked: %v", r)
 			}
 		}()
-		
+
 		// We can't actually call Execute() in tests as it would run the CLI
 		// Instead, we verify the function exists and the command structure
 		// Execute function is available by definition
@@ -73,21 +73,21 @@ func TestSubcommands(t *testing.T) {
 
 func TestCommandStructure(t *testing.T) {
 	commands := []*cobra.Command{authCmd, lsCmd, pruneCmd}
-	
+
 	for _, cmd := range commands {
 		t.Run(cmd.Use+" command structure", func(t *testing.T) {
 			if cmd.Use == "" {
 				t.Errorf("Command should have a Use field")
 			}
-			
+
 			if cmd.Short == "" {
 				t.Errorf("Command %q should have a Short description", cmd.Use)
 			}
-			
+
 			if cmd.Long == "" {
 				t.Errorf("Command %q should have a Long description", cmd.Use)
 			}
-			
+
 			if cmd.Run == nil && cmd.RunE == nil {
 				t.Errorf("Command %q should have a Run or RunE function", cmd.Use)
 			}
@@ -100,8 +100,9 @@ func TestRootFlags(t *testing.T) {
 		flag := rootCmd.Flags().Lookup("toggle")
 		if flag == nil {
 			t.Error("Root command should have toggle flag")
+			return
 		}
-		
+
 		if flag.Shorthand != "t" {
 			t.Errorf("Expected toggle flag shorthand 't', got %q", flag.Shorthand)
 		}
@@ -113,12 +114,13 @@ func TestAuthCommandFlags(t *testing.T) {
 		flag := authCmd.Flags().Lookup("platform")
 		if flag == nil {
 			t.Error("Auth command should have platform flag")
+			return
 		}
-		
+
 		if flag.Shorthand != "p" {
 			t.Errorf("Expected platform flag shorthand 'p', got %q", flag.Shorthand)
 		}
-		
+
 		if flag.DefValue != "bluesky" {
 			t.Errorf("Expected platform flag default 'bluesky', got %q", flag.DefValue)
 		}
@@ -128,8 +130,9 @@ func TestAuthCommandFlags(t *testing.T) {
 		flag := authCmd.Flags().Lookup("status")
 		if flag == nil {
 			t.Error("Auth command should have status flag")
+			return
 		}
-		
+
 		if flag.DefValue != "false" {
 			t.Errorf("Expected status flag default 'false', got %q", flag.DefValue)
 		}
@@ -141,12 +144,13 @@ func TestLsCommandFlags(t *testing.T) {
 		flag := lsCmd.Flags().Lookup("platform")
 		if flag == nil {
 			t.Error("Ls command should have platform flag")
+			return
 		}
-		
+
 		if flag.Shorthand != "p" {
 			t.Errorf("Expected platform flag shorthand 'p', got %q", flag.Shorthand)
 		}
-		
+
 		if flag.DefValue != "bluesky" {
 			t.Errorf("Expected platform flag default 'bluesky', got %q", flag.DefValue)
 		}
@@ -178,7 +182,7 @@ func TestPruneCommandFlags(t *testing.T) {
 				t.Errorf("Prune command should have %s flag", expected.name)
 				return
 			}
-			
+
 			if expected.hasShorthand && flag.Shorthand != expected.shorthand {
 				t.Errorf("Expected %s flag shorthand %q, got %q", expected.name, expected.shorthand, flag.Shorthand)
 			}
@@ -202,7 +206,7 @@ func TestCommandArgsValidation(t *testing.T) {
 	})
 
 	t.Run("prune command args", func(t *testing.T) {
-		// MaximumNArgs(1) is a function, we can't compare directly  
+		// MaximumNArgs(1) is a function, we can't compare directly
 		// We test that Args is set
 		if pruneCmd.Args == nil {
 			t.Error("Prune command should have args validation")
@@ -222,7 +226,7 @@ func findCommand(parent *cobra.Command, name string) *cobra.Command {
 
 func TestCommandHelp(t *testing.T) {
 	commands := []*cobra.Command{rootCmd, authCmd, lsCmd, pruneCmd}
-	
+
 	for _, cmd := range commands {
 		t.Run(cmd.Use+" help text", func(t *testing.T) {
 			// Test that help doesn't panic
@@ -231,7 +235,7 @@ func TestCommandHelp(t *testing.T) {
 					t.Errorf("Help for command %q panicked: %v", cmd.Use, r)
 				}
 			}()
-			
+
 			// Generate help text to ensure it doesn't panic
 			_ = cmd.UsageString()
 		})
@@ -245,23 +249,23 @@ func TestLongDescriptions(t *testing.T) {
 		shouldMatch []string
 	}{
 		{
-			name: "root command mentions platforms",
-			cmd:  rootCmd,
+			name:        "root command mentions platforms",
+			cmd:         rootCmd,
 			shouldMatch: []string{"Bluesky", "Mastodon"},
 		},
 		{
-			name: "auth command mentions authentication",
-			cmd:  authCmd,
+			name:        "auth command mentions authentication",
+			cmd:         authCmd,
 			shouldMatch: []string{"authentication", "credentials"},
 		},
 		{
-			name: "ls command mentions posts",
-			cmd:  lsCmd,
+			name:        "ls command mentions posts",
+			cmd:         lsCmd,
 			shouldMatch: []string{"posts", "timeline"},
 		},
 		{
-			name: "prune command mentions deletion",
-			cmd:  pruneCmd,
+			name:        "prune command mentions deletion",
+			cmd:         pruneCmd,
 			shouldMatch: []string{"Delete", "dry-run"},
 		},
 	}

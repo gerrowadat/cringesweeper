@@ -15,7 +15,7 @@ func TestMain(t *testing.T) {
 			t.Errorf("main() panicked: %v", r)
 		}
 	}()
-	
+
 	// Just verify the main function is properly defined
 	// (it's not nil by definition in Go, so we just test structure)
 	t.Log("main function is properly defined")
@@ -27,18 +27,18 @@ func TestMainExecution(t *testing.T) {
 		main()
 		return
 	}
-	
+
 	// Run the main function in a subprocess
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainExecution")
 	cmd.Env = append(os.Environ(), "BE_CRINGESWEEPER=1")
 	err := cmd.Run()
-	
+
 	// The command should exit with status 1 because no subcommand is provided
 	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
 		// This is expected - the program exits with non-zero when no command given
 		return
 	}
-	
+
 	if err != nil {
 		t.Errorf("Unexpected error running main: %v", err)
 	}
@@ -53,16 +53,16 @@ func TestMainWithHelpFlag(t *testing.T) {
 		defer func() {
 			os.Args = originalArgs
 		}()
-		
+
 		main()
 		return
 	}
-	
+
 	// Run with help flag in subprocess
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainWithHelpFlag")
 	cmd.Env = append(os.Environ(), "BE_CRINGESWEEPER_HELP=1")
 	err := cmd.Run()
-	
+
 	// Help should exit with status 0
 	if err != nil {
 		if e, ok := err.(*exec.ExitError); ok && e.ExitCode() != 0 {
@@ -75,7 +75,7 @@ func TestPackageStructure(t *testing.T) {
 	// Test that the main package properly imports cmd
 	// This is validated by successful compilation, but we can check
 	// that we're using the expected package structure
-	
+
 	// Just verify this compiles as the main package
 	t.Log("This is the main package")
 }

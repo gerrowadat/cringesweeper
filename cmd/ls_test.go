@@ -35,13 +35,13 @@ func TestDisplayPosts(t *testing.T) {
 			URL:       "https://example.com/post/2",
 		},
 		{
-			ID:          "3",
-			Author:      "Charlie",
-			Handle:      "charlie",
-			Content:     "Shared content",
-			CreatedAt:   now.Add(-2 * time.Hour),
-			Type:        internal.PostTypeRepost,
-			Platform:    "test",
+			ID:        "3",
+			Author:    "Charlie",
+			Handle:    "charlie",
+			Content:   "Shared content",
+			CreatedAt: now.Add(-2 * time.Hour),
+			Type:      internal.PostTypeRepost,
+			Platform:  "test",
 			OriginalPost: &internal.Post{
 				ID:      "original",
 				Author:  "Dave",
@@ -61,7 +61,7 @@ func TestDisplayPosts(t *testing.T) {
 				t.Errorf("displayPosts panicked: %v", r)
 			}
 		}()
-		
+
 		displayPosts(posts, "TestPlatform")
 	})
 
@@ -71,7 +71,7 @@ func TestDisplayPosts(t *testing.T) {
 				t.Errorf("displayPosts panicked with empty posts: %v", r)
 			}
 		}()
-		
+
 		displayPosts([]internal.Post{}, "TestPlatform")
 	})
 }
@@ -103,7 +103,7 @@ func TestPostTypeIndicators(t *testing.T) {
 			case internal.PostTypeLike:
 				indicator = " [LIKE]"
 			}
-			
+
 			if indicator != tt.expected {
 				t.Errorf("Expected indicator %q for type %v, got %q", tt.expected, tt.postType, indicator)
 			}
@@ -113,10 +113,10 @@ func TestPostTypeIndicators(t *testing.T) {
 
 func TestAuthorDisplayLogic(t *testing.T) {
 	tests := []struct {
-		name         string
-		author       string
-		handle       string
-		expectedFmt  string
+		name        string
+		author      string
+		handle      string
+		expectedFmt string
 	}{
 		{"author same as handle", "alice", "alice", "@alice"},
 		{"author different from handle", "Alice Smith", "alice", "@alice (Alice Smith)"},
@@ -133,7 +133,7 @@ func TestAuthorDisplayLogic(t *testing.T) {
 			} else {
 				result = "@" + tt.handle
 			}
-			
+
 			if result != tt.expectedFmt {
 				t.Errorf("Expected %q, got %q", tt.expectedFmt, result)
 			}
@@ -143,9 +143,9 @@ func TestAuthorDisplayLogic(t *testing.T) {
 
 func TestEngagementMetricsDisplay(t *testing.T) {
 	tests := []struct {
-		name        string
-		post        internal.Post
-		hasMetrics  bool
+		name       string
+		post       internal.Post
+		hasMetrics bool
 	}{
 		{
 			name: "post with all metrics",
@@ -180,7 +180,7 @@ func TestEngagementMetricsDisplay(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test engagement metrics display logic
 			hasAnyMetrics := tt.post.LikeCount > 0 || tt.post.RepostCount > 0 || tt.post.ReplyCount > 0
-			
+
 			if hasAnyMetrics != tt.hasMetrics {
 				t.Errorf("Expected hasMetrics %v, got %v", tt.hasMetrics, hasAnyMetrics)
 			}
@@ -190,11 +190,11 @@ func TestEngagementMetricsDisplay(t *testing.T) {
 
 func TestMetricsFormatting(t *testing.T) {
 	tests := []struct {
-		name      string
-		likes     int
-		reposts   int
-		replies   int
-		expected  []string
+		name     string
+		likes    int
+		reposts  int
+		replies  int
+		expected []string
 	}{
 		{
 			name:     "all metrics",
@@ -232,7 +232,7 @@ func TestMetricsFormatting(t *testing.T) {
 			if tt.replies > 0 {
 				metrics = append(metrics, "3 replies")
 			}
-			
+
 			// For the first test case, check we have the right number of metrics
 			if tt.name == "all metrics" && len(metrics) != 3 {
 				t.Errorf("Expected 3 metrics, got %d", len(metrics))
@@ -243,9 +243,9 @@ func TestMetricsFormatting(t *testing.T) {
 
 func TestRepostDisplayLogic(t *testing.T) {
 	tests := []struct {
-		name                string
-		post                internal.Post
-		shouldShowOriginal  bool
+		name               string
+		post               internal.Post
+		shouldShowOriginal bool
 	}{
 		{
 			name: "repost with original post",
@@ -282,7 +282,7 @@ func TestRepostDisplayLogic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test repost display logic
 			shouldShow := tt.post.Type == internal.PostTypeRepost && tt.post.OriginalPost != nil
-			
+
 			if shouldShow != tt.shouldShowOriginal {
 				t.Errorf("Expected shouldShowOriginal %v, got %v", tt.shouldShowOriginal, shouldShow)
 			}
@@ -311,7 +311,7 @@ func TestOriginalAuthorDisplay(t *testing.T) {
 			} else {
 				result = "@" + tt.originalHandle
 			}
-			
+
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -335,7 +335,7 @@ func TestLsCommandValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test platform validation logic that would be used in ls command
 			_, isValid := internal.GetClient(tt.platform)
-			
+
 			if isValid != tt.shouldBeValid {
 				t.Errorf("Platform %q validity: expected %v, got %v", tt.platform, tt.shouldBeValid, isValid)
 			}
@@ -373,7 +373,7 @@ func TestDisplayPostsWithQuotePost(t *testing.T) {
 				t.Errorf("displayPosts panicked with quote post: %v", r)
 			}
 		}()
-		
+
 		displayPosts(posts, "TestPlatform")
 	})
 }
@@ -399,7 +399,7 @@ func TestDisplayPostsWithLikePost(t *testing.T) {
 				t.Errorf("displayPosts panicked with like post: %v", r)
 			}
 		}()
-		
+
 		displayPosts(posts, "TestPlatform")
 	})
 }
@@ -423,11 +423,11 @@ func TestMetricsStringFormatting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test engagement metrics display logic
 			hasMetrics := tt.likes > 0 || tt.reposts > 0 || tt.replies > 0
-			
+
 			if hasMetrics != tt.shouldShow {
 				t.Errorf("Expected shouldShow %v, got %v", tt.shouldShow, hasMetrics)
 			}
-			
+
 			if hasMetrics {
 				var metrics []string
 				if tt.likes > 0 {
@@ -439,7 +439,7 @@ func TestMetricsStringFormatting(t *testing.T) {
 				if tt.replies > 0 {
 					metrics = append(metrics, fmt.Sprintf("%d replies", tt.replies))
 				}
-				
+
 				if len(metrics) == 0 {
 					t.Error("Expected metrics but got empty slice")
 				}
@@ -450,7 +450,7 @@ func TestMetricsStringFormatting(t *testing.T) {
 
 func TestDisplayPostsFormattingEdgeCases(t *testing.T) {
 	now := time.Now()
-	
+
 	// Test post with very long content
 	longContentPost := internal.Post{
 		ID:        "long",
@@ -461,7 +461,7 @@ func TestDisplayPostsFormattingEdgeCases(t *testing.T) {
 		Type:      internal.PostTypeOriginal,
 		Platform:  "test",
 	}
-	
+
 	// Test post with special characters
 	specialCharsPost := internal.Post{
 		ID:        "special",
@@ -472,7 +472,7 @@ func TestDisplayPostsFormattingEdgeCases(t *testing.T) {
 		Type:      internal.PostTypeOriginal,
 		Platform:  "test",
 	}
-	
+
 	posts := []internal.Post{longContentPost, specialCharsPost}
 
 	t.Run("display posts with edge cases", func(t *testing.T) {
@@ -481,7 +481,7 @@ func TestDisplayPostsFormattingEdgeCases(t *testing.T) {
 				t.Errorf("displayPosts panicked with edge cases: %v", r)
 			}
 		}()
-		
+
 		displayPosts(posts, "TestPlatform")
 	})
 }
@@ -509,7 +509,7 @@ func TestDisplayPostsRepostWithoutOriginal(t *testing.T) {
 				t.Errorf("displayPosts panicked with repost without original: %v", r)
 			}
 		}()
-		
+
 		displayPosts(posts, "TestPlatform")
 	})
 }

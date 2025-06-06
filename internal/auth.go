@@ -9,12 +9,12 @@ import (
 
 // Credentials stores authentication information for a platform
 type Credentials struct {
-	Platform     string            `json:"platform"`
-	Username     string            `json:"username"`
-	Instance     string            `json:"instance,omitempty"` // For Mastodon
-	AccessToken  string            `json:"access_token,omitempty"`
-	AppPassword  string            `json:"app_password,omitempty"` // For Bluesky
-	ExtraData    map[string]string `json:"extra_data,omitempty"`
+	Platform    string            `json:"platform"`
+	Username    string            `json:"username"`
+	Instance    string            `json:"instance,omitempty"` // For Mastodon
+	AccessToken string            `json:"access_token,omitempty"`
+	AppPassword string            `json:"app_password,omitempty"` // For Bluesky
+	ExtraData   map[string]string `json:"extra_data,omitempty"`
 }
 
 // AuthManager handles credential storage and retrieval
@@ -30,7 +30,7 @@ func NewAuthManager() (*AuthManager, error) {
 	}
 
 	configDir := filepath.Join(homeDir, ".config", "cringesweeper")
-	
+
 	// Create config directory if it doesn't exist
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
@@ -42,7 +42,7 @@ func NewAuthManager() (*AuthManager, error) {
 // SaveCredentials stores credentials for a platform
 func (am *AuthManager) SaveCredentials(creds *Credentials) error {
 	filename := filepath.Join(am.configDir, fmt.Sprintf("%s.json", creds.Platform))
-	
+
 	data, err := json.MarshalIndent(creds, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
@@ -58,7 +58,7 @@ func (am *AuthManager) SaveCredentials(creds *Credentials) error {
 // LoadCredentials retrieves stored credentials for a platform
 func (am *AuthManager) LoadCredentials(platform string) (*Credentials, error) {
 	filename := filepath.Join(am.configDir, fmt.Sprintf("%s.json", platform))
-	
+
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -78,7 +78,7 @@ func (am *AuthManager) LoadCredentials(platform string) (*Credentials, error) {
 // DeleteCredentials removes stored credentials for a platform
 func (am *AuthManager) DeleteCredentials(platform string) error {
 	filename := filepath.Join(am.configDir, fmt.Sprintf("%s.json", platform))
-	
+
 	if err := os.Remove(filename); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete credentials file: %w", err)
 	}

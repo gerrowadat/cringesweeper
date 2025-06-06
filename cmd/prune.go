@@ -67,9 +67,9 @@ permanent and cannot be undone. Requires authentication for the target platform.
 			case "mastodon":
 				rateLimitDelay = 60 * time.Second // Conservative for Mastodon's 30 DELETEs per 30 minutes
 			case "bluesky":
-				rateLimitDelay = 1 * time.Second  // More permissive for Bluesky's higher limits
+				rateLimitDelay = 1 * time.Second // More permissive for Bluesky's higher limits
 			default:
-				rateLimitDelay = 5 * time.Second  // Safe default for unknown platforms
+				rateLimitDelay = 5 * time.Second // Safe default for unknown platforms
 			}
 		}
 

@@ -76,7 +76,7 @@ func TestExtractPostID(t *testing.T) {
 
 func TestBlueskyClient_DeterminePostType(t *testing.T) {
 	client := NewBlueskyClient()
-	
+
 	tests := []struct {
 		name     string
 		post     blueskyPost
@@ -195,13 +195,13 @@ func TestBlueskyClient_FetchUserPosts(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/xrpc/app.bsky.feed.getAuthorFeed") {
 			t.Errorf("Unexpected API path: %s", r.URL.Path)
 		}
-		
+
 		// Check query parameters
 		username := r.URL.Query().Get("actor")
 		if username == "" {
 			t.Error("Actor parameter should be provided")
 		}
-		
+
 		limit := r.URL.Query().Get("limit")
 		if limit == "" {
 			t.Error("Limit parameter should be provided")
@@ -238,7 +238,7 @@ func TestBlueskyClient_FetchUserPosts(t *testing.T) {
 				},
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -248,11 +248,11 @@ func TestBlueskyClient_FetchUserPosts(t *testing.T) {
 	// without dependency injection or interface mocking for the HTTP client
 	t.Run("fetch posts structure", func(t *testing.T) {
 		client := NewBlueskyClient()
-		
+
 		// In a real test, we'd need to inject the mock server URL
 		// For now, we just test that the client implements the interface
 		var _ SocialClient = client
-		
+
 		// Test that it doesn't panic with invalid input
 		defer func() {
 			if r := recover(); r != nil {
@@ -264,21 +264,21 @@ func TestBlueskyClient_FetchUserPosts(t *testing.T) {
 
 func TestBlueskyClient_PrunePosts(t *testing.T) {
 	client := NewBlueskyClient()
-	
+
 	// Test that the method exists and handles invalid credentials gracefully
 	t.Run("prune posts without credentials", func(t *testing.T) {
 		options := PruneOptions{
 			MaxAge: func() *time.Duration { d := 30 * 24 * time.Hour; return &d }(),
 			DryRun: true,
 		}
-		
+
 		// This should fail due to missing credentials
 		result, err := client.PrunePosts("test.bsky.social", options)
-		
+
 		if err == nil {
 			t.Error("Expected error when no credentials are available")
 		}
-		
+
 		if result != nil {
 			t.Error("Expected nil result when credentials are missing")
 		}
@@ -317,7 +317,7 @@ func TestBlueskyPost_Conversion(t *testing.T) {
 		Content:   bskyPost.Record.Text,
 		CreatedAt: bskyPost.Record.CreatedAt,
 		Platform:  "bluesky",
-		
+
 		RepostCount: bskyPost.RepostCount,
 		LikeCount:   bskyPost.LikeCount,
 		ReplyCount:  bskyPost.ReplyCount,
@@ -327,23 +327,23 @@ func TestBlueskyPost_Conversion(t *testing.T) {
 		if post.ID != bskyPost.URI {
 			t.Errorf("Expected ID %q, got %q", bskyPost.URI, post.ID)
 		}
-		
+
 		if post.Author != bskyPost.Author.DisplayName {
 			t.Errorf("Expected Author %q, got %q", bskyPost.Author.DisplayName, post.Author)
 		}
-		
+
 		if post.Handle != bskyPost.Author.Handle {
 			t.Errorf("Expected Handle %q, got %q", bskyPost.Author.Handle, post.Handle)
 		}
-		
+
 		if post.Content != bskyPost.Record.Text {
 			t.Errorf("Expected Content %q, got %q", bskyPost.Record.Text, post.Content)
 		}
-		
+
 		if post.Platform != "bluesky" {
 			t.Errorf("Expected Platform 'bluesky', got %q", post.Platform)
 		}
-		
+
 		if post.LikeCount != bskyPost.LikeCount {
 			t.Errorf("Expected LikeCount %d, got %d", bskyPost.LikeCount, post.LikeCount)
 		}
@@ -353,7 +353,7 @@ func TestBlueskyPost_Conversion(t *testing.T) {
 		// Test when DisplayName is empty
 		bskyPostNoDisplay := bskyPost
 		bskyPostNoDisplay.Author.DisplayName = ""
-		
+
 		expectedAuthor := bskyPost.Author.Handle
 		if bskyPostNoDisplay.Author.DisplayName == "" {
 			if expectedAuthor != bskyPost.Author.Handle {
@@ -369,18 +369,18 @@ func TestBlueskyPost_Conversion(t *testing.T) {
 		bskyPostLiked.ViewerData = &blueskyViewerData{
 			Like: &likeURI,
 		}
-		
+
 		isLiked := bskyPostLiked.ViewerData != nil && bskyPostLiked.ViewerData.Like != nil
 		if !isLiked {
 			t.Error("Should detect liked status when Like URI is present")
 		}
-		
+
 		// Test not liked status
 		bskyPostNotLiked := bskyPost
 		bskyPostNotLiked.ViewerData = &blueskyViewerData{
 			Like: nil,
 		}
-		
+
 		isNotLiked := bskyPostNotLiked.ViewerData != nil && bskyPostNotLiked.ViewerData.Like != nil
 		if isNotLiked {
 			t.Error("Should not detect liked status when Like URI is nil")
@@ -410,7 +410,7 @@ func TestBlueskyReplyHandling(t *testing.T) {
 	t.Run("reply detection", func(t *testing.T) {
 		client := NewBlueskyClient()
 		postType := client.determinePostType(replyPost)
-		
+
 		if postType != PostTypeReply {
 			t.Errorf("Expected PostTypeReply, got %v", postType)
 		}
@@ -422,7 +422,7 @@ func TestBlueskyReplyHandling(t *testing.T) {
 		if replyPost.Record.Reply != nil {
 			inReplyToID = replyPost.Record.Reply.Parent.URI
 		}
-		
+
 		expectedParentURI := "at://did:plc:parent/app.bsky.feed.post/parent123"
 		if inReplyToID != expectedParentURI {
 			t.Errorf("Expected parent URI %q, got %q", expectedParentURI, inReplyToID)
@@ -441,7 +441,7 @@ func TestBlueskyRepostHandling(t *testing.T) {
 	t.Run("repost detection", func(t *testing.T) {
 		client := NewBlueskyClient()
 		postType := client.determinePostType(repostPost)
-		
+
 		if postType != PostTypeRepost {
 			t.Errorf("Expected PostTypeRepost, got %v", postType)
 		}
@@ -450,11 +450,11 @@ func TestBlueskyRepostHandling(t *testing.T) {
 	t.Run("repost type override", func(t *testing.T) {
 		// Test logic from FetchUserPosts where repost type is set
 		postType := PostTypeOriginal // Initial value
-		
+
 		if repostPost.Record.Type == "app.bsky.feed.repost" {
 			postType = PostTypeRepost
 		}
-		
+
 		if postType != PostTypeRepost {
 			t.Errorf("Expected PostTypeRepost after override, got %v", postType)
 		}
@@ -487,7 +487,7 @@ func TestBlueskyURLGeneration(t *testing.T) {
 			// Test URL generation logic from FetchUserPosts
 			postID := extractPostID(tt.uri)
 			url := "https://bsky.app/profile/" + tt.handle + "/post/" + postID
-			
+
 			if url != tt.expected {
 				t.Errorf("Expected URL %q, got %q", tt.expected, url)
 			}
@@ -501,11 +501,11 @@ func TestBlueskySessionCreation(t *testing.T) {
 		if r.URL.Path != "/xrpc/com.atproto.server.createSession" {
 			t.Errorf("Unexpected session path: %s", r.URL.Path)
 		}
-		
+
 		if r.Method != "POST" {
 			t.Errorf("Expected POST method, got %s", r.Method)
 		}
-		
+
 		// Mock successful session response
 		response := atpSessionResponse{
 			AccessJwt:  "mock.jwt.token",
@@ -513,7 +513,7 @@ func TestBlueskySessionCreation(t *testing.T) {
 			Handle:     "test.bsky.social",
 			DID:        "did:plc:test123",
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -525,12 +525,12 @@ func TestBlueskySessionCreation(t *testing.T) {
 			"identifier": "test.bsky.social",
 			"password":   "test-app-password",
 		}
-		
+
 		jsonData, err := json.Marshal(sessionData)
 		if err != nil {
 			t.Errorf("Failed to marshal session data: %v", err)
 		}
-		
+
 		if len(jsonData) == 0 {
 			t.Error("Session data should not be empty")
 		}
@@ -615,7 +615,7 @@ func TestBlueskyAPIParameterValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test parameter validation logic
 			isValid := tt.username != "" && tt.limit > 0
-			
+
 			if isValid != tt.valid {
 				t.Errorf("Expected validity %v, got %v", tt.valid, isValid)
 			}

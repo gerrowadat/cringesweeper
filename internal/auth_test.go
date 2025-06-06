@@ -102,34 +102,34 @@ func TestCredentials_Validation(t *testing.T) {
 func TestAuthManager_SaveAndLoadCredentials(t *testing.T) {
 	// Create a temporary directory for test
 	tempDir := t.TempDir()
-	
+
 	// Create auth manager with temporary directory
 	authManager := &AuthManager{configDir: tempDir}
-	
+
 	testCredentials := &Credentials{
 		Platform:    "bluesky",
 		Username:    "test.bsky.social",
 		AppPassword: "test-password",
 	}
-	
+
 	// Test saving credentials
 	err := authManager.SaveCredentials(testCredentials)
 	if err != nil {
 		t.Fatalf("SaveCredentials() should not return error: %v", err)
 	}
-	
+
 	// Verify file was created
 	credFile := filepath.Join(tempDir, "bluesky.json")
 	if _, err := os.Stat(credFile); os.IsNotExist(err) {
 		t.Fatal("Credentials file should have been created")
 	}
-	
+
 	// Test loading credentials
 	loadedCredentials, err := authManager.LoadCredentials("bluesky")
 	if err != nil {
 		t.Fatalf("LoadCredentials() should not return error: %v", err)
 	}
-	
+
 	// Verify loaded credentials match saved credentials
 	if loadedCredentials.Platform != testCredentials.Platform {
 		t.Errorf("Platform mismatch: expected %s, got %s", testCredentials.Platform, loadedCredentials.Platform)
@@ -145,10 +145,10 @@ func TestAuthManager_SaveAndLoadCredentials(t *testing.T) {
 func TestAuthManager_LoadCredentials_NotFound(t *testing.T) {
 	// Create a temporary directory for test
 	tempDir := t.TempDir()
-	
+
 	// Create auth manager with temporary directory
 	authManager := &AuthManager{configDir: tempDir}
-	
+
 	// Test loading non-existent credentials
 	_, err := authManager.LoadCredentials("nonexistent")
 	if err == nil {
@@ -159,10 +159,10 @@ func TestAuthManager_LoadCredentials_NotFound(t *testing.T) {
 func TestAuthManager_ListPlatforms(t *testing.T) {
 	// Create a temporary directory for test
 	tempDir := t.TempDir()
-	
+
 	// Create auth manager with temporary directory
 	authManager := &AuthManager{configDir: tempDir}
-	
+
 	// Initially should be empty
 	platforms, err := authManager.ListPlatforms()
 	if err != nil {
@@ -171,7 +171,7 @@ func TestAuthManager_ListPlatforms(t *testing.T) {
 	if len(platforms) != 0 {
 		t.Errorf("Expected empty platform list, got %d platforms", len(platforms))
 	}
-	
+
 	// Save some test credentials
 	blueskyCredentials := &Credentials{
 		Platform:    "bluesky",
@@ -184,10 +184,10 @@ func TestAuthManager_ListPlatforms(t *testing.T) {
 		Instance:    "https://mastodon.social",
 		AccessToken: "test-token",
 	}
-	
+
 	authManager.SaveCredentials(blueskyCredentials)
 	authManager.SaveCredentials(mastodonCredentials)
-	
+
 	// Now should have both platforms
 	platforms, err = authManager.ListPlatforms()
 	if err != nil {
@@ -196,7 +196,7 @@ func TestAuthManager_ListPlatforms(t *testing.T) {
 	if len(platforms) != 2 {
 		t.Errorf("Expected 2 platforms, got %d", len(platforms))
 	}
-	
+
 	// Check that both platforms are present
 	platformMap := make(map[string]bool)
 	for _, platform := range platforms {
@@ -213,34 +213,34 @@ func TestAuthManager_ListPlatforms(t *testing.T) {
 func TestAuthManager_DeleteCredentials(t *testing.T) {
 	// Create a temporary directory for test
 	tempDir := t.TempDir()
-	
+
 	// Create auth manager with temporary directory
 	authManager := &AuthManager{configDir: tempDir}
-	
+
 	testCredentials := &Credentials{
 		Platform:    "bluesky",
 		Username:    "test.bsky.social",
 		AppPassword: "test-password",
 	}
-	
+
 	// Save credentials first
 	err := authManager.SaveCredentials(testCredentials)
 	if err != nil {
 		t.Fatalf("SaveCredentials() should not return error: %v", err)
 	}
-	
+
 	// Verify credentials exist
 	_, err = authManager.LoadCredentials("bluesky")
 	if err != nil {
 		t.Fatalf("LoadCredentials() should not return error after saving: %v", err)
 	}
-	
+
 	// Delete credentials
 	err = authManager.DeleteCredentials("bluesky")
 	if err != nil {
 		t.Fatalf("DeleteCredentials() should not return error: %v", err)
 	}
-	
+
 	// Verify credentials no longer exist
 	_, err = authManager.LoadCredentials("bluesky")
 	if err == nil {
@@ -259,20 +259,20 @@ func TestCredentials_JSON_Serialization(t *testing.T) {
 			"client_secret": "test-client-secret",
 		},
 	}
-	
+
 	// Test JSON marshaling
 	jsonData, err := json.Marshal(originalCredentials)
 	if err != nil {
 		t.Fatalf("JSON marshaling should not return error: %v", err)
 	}
-	
+
 	// Test JSON unmarshaling
 	var loadedCredentials Credentials
 	err = json.Unmarshal(jsonData, &loadedCredentials)
 	if err != nil {
 		t.Fatalf("JSON unmarshaling should not return error: %v", err)
 	}
-	
+
 	// Verify all fields match
 	if loadedCredentials.Platform != originalCredentials.Platform {
 		t.Errorf("Platform mismatch after JSON round-trip")
@@ -286,7 +286,7 @@ func TestCredentials_JSON_Serialization(t *testing.T) {
 	if loadedCredentials.AccessToken != originalCredentials.AccessToken {
 		t.Errorf("AccessToken mismatch after JSON round-trip")
 	}
-	
+
 	// Verify ExtraData
 	if len(loadedCredentials.ExtraData) != len(originalCredentials.ExtraData) {
 		t.Errorf("ExtraData length mismatch after JSON round-trip")

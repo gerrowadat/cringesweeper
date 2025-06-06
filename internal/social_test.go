@@ -71,7 +71,7 @@ func TestGetClient_PlatformName(t *testing.T) {
 
 func TestGetClient_RequiresAuth(t *testing.T) {
 	platforms := []string{"bluesky", "mastodon"}
-	
+
 	for _, platform := range platforms {
 		client, exists := GetClient(platform)
 		if !exists {
@@ -124,7 +124,7 @@ func TestPruneOptions_Validation(t *testing.T) {
 				MaxAge:           &maxAge,
 				PreservePinned:   true,
 				PreserveSelfLike: true,
-				DryRun:          true,
+				DryRun:           true,
 			},
 			valid: true,
 		},
@@ -134,7 +134,7 @@ func TestPruneOptions_Validation(t *testing.T) {
 				MaxAge:         &maxAge,
 				UnlikePosts:    true,
 				UnshareReposts: true,
-				DryRun:        true,
+				DryRun:         true,
 			},
 			valid: true,
 		},
@@ -184,7 +184,7 @@ func TestPruneResult_Counts(t *testing.T) {
 
 func TestSupportedPlatforms(t *testing.T) {
 	expectedPlatforms := []string{"bluesky", "mastodon"}
-	
+
 	for _, platform := range expectedPlatforms {
 		t.Run("platform "+platform, func(t *testing.T) {
 			constructor, exists := SupportedPlatforms[platform]
@@ -192,17 +192,17 @@ func TestSupportedPlatforms(t *testing.T) {
 				t.Errorf("Platform %s should be supported", platform)
 				return
 			}
-			
+
 			client := constructor()
 			if client == nil {
 				t.Errorf("Constructor for %s should return a valid client", platform)
 			}
-			
+
 			// Verify the client implements the interface
 			var _ SocialClient = client
 		})
 	}
-	
+
 	// Test unsupported platform
 	_, exists := SupportedPlatforms["twitter"]
 	if exists {
@@ -221,7 +221,7 @@ func TestPost_CompleteStructure(t *testing.T) {
 		Type:      PostTypeOriginal,
 		Platform:  "test",
 	}
-	
+
 	post := Post{
 		ID:        "test123",
 		Author:    "Test Author",
@@ -230,28 +230,28 @@ func TestPost_CompleteStructure(t *testing.T) {
 		CreatedAt: now,
 		URL:       "https://example.com/post/test123",
 		Type:      PostTypeQuote,
-		
+
 		OriginalPost:   originalPost,
 		OriginalAuthor: "Original Author",
 		OriginalHandle: "original",
-		
+
 		InReplyToID:     "reply456",
 		InReplyToAuthor: "Reply Author",
-		
+
 		RepostCount: 5,
 		LikeCount:   10,
 		ReplyCount:  3,
-		
+
 		IsLikedByUser: true,
 		IsPinned:      false,
-		
+
 		Platform: "test",
 		RawData: map[string]interface{}{
 			"extra_field": "extra_value",
 			"numeric":     123,
 		},
 	}
-	
+
 	// Test all fields are populated
 	if post.ID == "" {
 		t.Error("ID should not be empty")
@@ -305,7 +305,7 @@ func TestPost_CompleteStructure(t *testing.T) {
 
 func TestPruneOptions_EdgeCases(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name    string
 		options PruneOptions
@@ -347,16 +347,16 @@ func TestPruneOptions_EdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Basic validation - ensure options can be created
 			hasTimeCriteria := tt.options.MaxAge != nil || tt.options.BeforeDate != nil
-			
+
 			if tt.name == "negative max age" && tt.options.MaxAge != nil && *tt.options.MaxAge < 0 {
 				// In a real implementation, this should be validated
 				t.Log("Negative max age detected (should be validated by implementation)")
 			}
-			
+
 			if tt.name == "zero rate limit delay" && tt.options.RateLimitDelay == 0 {
 				t.Log("Zero rate limit delay is acceptable")
 			}
-			
+
 			if hasTimeCriteria || tt.name == "zero rate limit delay" || tt.name == "very large rate limit delay" {
 				// These cases should be valid in terms of structure
 			}
@@ -366,7 +366,7 @@ func TestPruneOptions_EdgeCases(t *testing.T) {
 
 func TestPruneResult_EmptyResult(t *testing.T) {
 	result := &PruneResult{}
-	
+
 	// Test empty result behavior
 	if len(result.PostsToDelete) != 0 {
 		t.Error("Empty result should have zero posts to delete")
@@ -411,7 +411,7 @@ func TestPost_JSONSerialization(t *testing.T) {
 		Type:      PostTypeOriginal,
 		Platform:  "test",
 	}
-	
+
 	post := Post{
 		ID:             "test123",
 		Author:         "Test Author",
@@ -433,20 +433,20 @@ func TestPost_JSONSerialization(t *testing.T) {
 			"test_field": "test_value",
 		},
 	}
-	
+
 	// Test JSON marshaling
 	jsonData, err := json.Marshal(post)
 	if err != nil {
 		t.Fatalf("Failed to marshal post to JSON: %v", err)
 	}
-	
+
 	// Test JSON unmarshaling
 	var unmarshaledPost Post
 	err = json.Unmarshal(jsonData, &unmarshaledPost)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal post from JSON: %v", err)
 	}
-	
+
 	// Verify key fields
 	if unmarshaledPost.ID != post.ID {
 		t.Errorf("ID mismatch after JSON round-trip: expected %s, got %s", post.ID, unmarshaledPost.ID)

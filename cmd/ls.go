@@ -17,17 +17,17 @@ Supports multiple platforms including Bluesky and Mastodon. Shows post content,
 timestamps, author information, and post types (original, repost, reply, etc.).
 
 The username can be provided as an argument or via environment variables.`,
-	Args:  cobra.MaximumNArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		platform, _ := cmd.Flags().GetString("platform")
 		username := ""
-		
+
 		// Get username with fallback priority: argument > saved credentials > environment
 		argUsername := ""
 		if len(args) > 0 {
 			argUsername = args[0]
 		}
-		
+
 		username, err := internal.GetUsernameForPlatform(platform, argUsername)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -60,7 +60,7 @@ func displayPosts(posts []internal.Post, platform string) {
 
 	for i, post := range posts {
 		fmt.Printf("Post %d", i+1)
-		
+
 		// Show post type indicator
 		switch post.Type {
 		case internal.PostTypeRepost:
@@ -73,15 +73,15 @@ func displayPosts(posts []internal.Post, platform string) {
 			fmt.Printf(" [LIKE]")
 		}
 		fmt.Printf(":\n")
-		
+
 		fmt.Printf("  Author: @%s", post.Handle)
 		if post.Author != "" && post.Author != post.Handle {
 			fmt.Printf(" (%s)", post.Author)
 		}
 		fmt.Printf("\n")
-		
+
 		fmt.Printf("  Posted: %s\n", post.CreatedAt.Format("2006-01-02 15:04:05"))
-		
+
 		// Handle reposts specially
 		if post.Type == internal.PostTypeRepost && post.OriginalPost != nil {
 			fmt.Printf("  Reposted from: @%s", post.OriginalHandle)
@@ -93,7 +93,7 @@ func displayPosts(posts []internal.Post, platform string) {
 		} else {
 			fmt.Printf("  Content: %s\n", post.Content)
 		}
-		
+
 		// Show engagement metrics if available
 		if post.LikeCount > 0 || post.RepostCount > 0 || post.ReplyCount > 0 {
 			fmt.Printf("  Engagement: ")
@@ -109,7 +109,7 @@ func displayPosts(posts []internal.Post, platform string) {
 			}
 			fmt.Printf("%s\n", fmt.Sprintf("%v", metrics))
 		}
-		
+
 		if post.URL != "" {
 			fmt.Printf("  URL: %s\n", post.URL)
 		}

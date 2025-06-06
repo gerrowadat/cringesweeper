@@ -30,19 +30,19 @@ func TestParseDuration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := parseDuration(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error for input %q, got none", tt.input)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error for input %q: %v", tt.input, err)
 				return
 			}
-			
+
 			if result != tt.expected {
 				t.Errorf("Expected %v for input %q, got %v", tt.expected, tt.input, result)
 			}
@@ -71,7 +71,7 @@ func TestParseDate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := parseDate(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error for input %q, got none", tt.input)
@@ -104,11 +104,11 @@ func TestTruncateContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := truncateContent(tt.content, tt.maxLen)
-			
+
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
-			
+
 			// Verify no newlines in result
 			if len(result) > 0 && (result[0] == '\n' || result[len(result)-1] == '\n') {
 				t.Errorf("Result should not contain newlines: %q", result)
@@ -132,7 +132,7 @@ func TestDisplayPruneResults(t *testing.T) {
 		PostsToUnlike: []internal.Post{
 			{
 				ID:        "2",
-				Handle:    "user2", 
+				Handle:    "user2",
 				Content:   "Unlike this post",
 				CreatedAt: now.Add(-24 * time.Hour),
 				URL:       "https://example.com/2",
@@ -171,7 +171,7 @@ func TestDisplayPruneResults(t *testing.T) {
 				t.Errorf("displayPruneResults panicked: %v", r)
 			}
 		}()
-		
+
 		displayPruneResults(result, "TestPlatform", true)
 	})
 
@@ -181,7 +181,7 @@ func TestDisplayPruneResults(t *testing.T) {
 				t.Errorf("displayPruneResults panicked: %v", r)
 			}
 		}()
-		
+
 		displayPruneResults(result, "TestPlatform", false)
 	})
 
@@ -192,13 +192,13 @@ func TestDisplayPruneResults(t *testing.T) {
 			PostsToUnshare: []internal.Post{},
 			PostsPreserved: []internal.Post{},
 		}
-		
+
 		defer func() {
 			if r := recover(); r != nil {
 				t.Errorf("displayPruneResults panicked with empty result: %v", r)
 			}
 		}()
-		
+
 		displayPruneResults(emptyResult, "TestPlatform", true)
 	})
 }
@@ -255,7 +255,7 @@ func TestPreservedPostReasonDetection(t *testing.T) {
 			if tt.post.IsPinned {
 				reason = " (pinned)"
 			}
-			
+
 			if reason != tt.expected {
 				t.Errorf("Expected reason %q, got %q", tt.expected, reason)
 			}
@@ -286,7 +286,7 @@ func TestRateLimitDelayDefaults(t *testing.T) {
 			default:
 				rateLimitDelay = 5 * time.Second
 			}
-			
+
 			if rateLimitDelay != tt.expected {
 				t.Errorf("Expected %v for platform %q, got %v", tt.expected, tt.platform, rateLimitDelay)
 			}
@@ -331,7 +331,7 @@ func TestPruneOptionsValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test the validation logic from prune command
 			hasError := (tt.maxAge == nil && tt.beforeDate == nil)
-			
+
 			if hasError != tt.shouldError {
 				t.Errorf("Expected error %v, got %v", tt.shouldError, hasError)
 			}
@@ -355,7 +355,7 @@ func TestResultSummaryCalculation(t *testing.T) {
 	t.Run("total actions calculation", func(t *testing.T) {
 		totalActions := len(result.PostsToDelete) + len(result.PostsToUnlike) + len(result.PostsToUnshare)
 		expected := 6
-		
+
 		if totalActions != expected {
 			t.Errorf("Expected total actions %d, got %d", expected, totalActions)
 		}
@@ -364,7 +364,7 @@ func TestResultSummaryCalculation(t *testing.T) {
 	t.Run("has actions check", func(t *testing.T) {
 		totalActions := len(result.PostsToDelete) + len(result.PostsToUnlike) + len(result.PostsToUnshare)
 		hasActions := totalActions > 0
-		
+
 		if !hasActions {
 			t.Error("Expected to have actions, but got none")
 		}
@@ -373,7 +373,7 @@ func TestResultSummaryCalculation(t *testing.T) {
 	t.Run("empty result check", func(t *testing.T) {
 		emptyResult := &internal.PruneResult{}
 		totalActions := len(emptyResult.PostsToDelete) + len(emptyResult.PostsToUnlike) + len(emptyResult.PostsToUnshare)
-		
+
 		if totalActions != 0 {
 			t.Errorf("Expected 0 actions for empty result, got %d", totalActions)
 		}
@@ -396,7 +396,7 @@ func TestPlatformValidationInPrune(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test platform validation logic that would be used in prune command
 			_, isValid := internal.GetClient(tt.platform)
-			
+
 			if isValid != tt.shouldBeValid {
 				t.Errorf("Platform %q validity: expected %v, got %v", tt.platform, tt.shouldBeValid, isValid)
 			}
@@ -424,7 +424,7 @@ func TestDisplayPruneResultsWithErrors(t *testing.T) {
 				t.Errorf("displayPruneResults panicked with errors: %v", r)
 			}
 		}()
-		
+
 		displayPruneResults(result, "TestPlatform", false)
 	})
 }
@@ -448,19 +448,19 @@ func TestParseDurationEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := parseDuration(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error for input %q, got none", tt.input)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error for input %q: %v", tt.input, err)
 				return
 			}
-			
+
 			if result != tt.expected {
 				t.Errorf("Expected %v for input %q, got %v", tt.expected, tt.input, result)
 			}
@@ -487,7 +487,7 @@ func TestParseDateEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := parseDate(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("Expected error for input %q, got none", tt.input)
@@ -519,11 +519,11 @@ func TestTruncateContentEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := truncateContent(tt.content, tt.maxLen)
-			
+
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
-			
+
 			// Ensure result doesn't exceed maxLen
 			if len(result) > tt.maxLen {
 				t.Errorf("Result length %d exceeds maxLen %d", len(result), tt.maxLen)
@@ -573,7 +573,7 @@ func TestDisplayPruneResultsEmptyCategories(t *testing.T) {
 					t.Errorf("displayPruneResults panicked: %v", r)
 				}
 			}()
-			
+
 			displayPruneResults(tt.result, "TestPlatform", tt.dryRun)
 		})
 	}
@@ -595,7 +595,7 @@ func TestPruneOptionsComplexScenarios(t *testing.T) {
 				MaxAge:           &maxAge,
 				PreservePinned:   true,
 				PreserveSelfLike: true,
-				DryRun:          true,
+				DryRun:           true,
 			},
 			description: "preserve pinned and self-liked posts",
 		},
@@ -605,7 +605,7 @@ func TestPruneOptionsComplexScenarios(t *testing.T) {
 				MaxAge:         &maxAge,
 				UnlikePosts:    true,
 				UnshareReposts: true,
-				DryRun:        true,
+				DryRun:         true,
 			},
 			description: "unlike and unshare instead of delete",
 		},
@@ -614,7 +614,7 @@ func TestPruneOptionsComplexScenarios(t *testing.T) {
 			options: internal.PruneOptions{
 				MaxAge:     &maxAge,
 				BeforeDate: &beforeDate,
-				DryRun:    true,
+				DryRun:     true,
 			},
 			description: "both max age and before date specified",
 		},
@@ -627,7 +627,7 @@ func TestPruneOptionsComplexScenarios(t *testing.T) {
 			if !hasTimeCriteria {
 				t.Error("Test case should have time criteria")
 			}
-			
+
 			// Test validation logic from prune command
 			if tt.options.MaxAge == nil && tt.options.BeforeDate == nil {
 				t.Error("Should require at least one time criteria")

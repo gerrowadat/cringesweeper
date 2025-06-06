@@ -46,7 +46,6 @@ func TestReadInput(t *testing.T) {
 	})
 }
 
-
 func TestAuthCommandValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -70,7 +69,7 @@ func TestAuthCommandValidation(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if isValid != tt.shouldBeValid {
 				t.Errorf("Platform %q validity: expected %v, got %v", tt.platform, tt.shouldBeValid, isValid)
 			}
@@ -95,9 +94,9 @@ func TestBlueskyAuthSetupValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test the validation logic that would be used in setupBlueskyAuth
 			hasError := (strings.TrimSpace(tt.username) == "" || strings.TrimSpace(tt.appPassword) == "")
-			
+
 			if hasError != tt.shouldError {
-				t.Errorf("Expected error %v for username=%q, password=%q, got %v", 
+				t.Errorf("Expected error %v for username=%q, password=%q, got %v",
 					tt.shouldError, tt.username, tt.appPassword, hasError)
 			}
 		})
@@ -122,12 +121,12 @@ func TestMastodonAuthSetupValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test the validation logic that would be used in setupMastodonAuth
-			hasError := (strings.TrimSpace(tt.instance) == "" || 
-				strings.TrimSpace(tt.username) == "" || 
+			hasError := (strings.TrimSpace(tt.instance) == "" ||
+				strings.TrimSpace(tt.username) == "" ||
 				strings.TrimSpace(tt.accessToken) == "")
-			
+
 			if hasError != tt.shouldError {
-				t.Errorf("Expected error %v for instance=%q, username=%q, token=%q, got %v", 
+				t.Errorf("Expected error %v for instance=%q, username=%q, token=%q, got %v",
 					tt.shouldError, tt.instance, tt.username, tt.accessToken, hasError)
 			}
 		})
@@ -153,7 +152,7 @@ func TestInstanceURLFormatting(t *testing.T) {
 			if !strings.HasPrefix(instance, "http") {
 				instance = "https://" + instance
 			}
-			
+
 			if instance != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, instance)
 			}
@@ -176,7 +175,7 @@ func TestSettingsURLGeneration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test settings URL generation logic
 			settingsURL := tt.instanceURL + "/settings/applications"
-			
+
 			if settingsURL != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, settingsURL)
 			}
@@ -202,7 +201,7 @@ func TestShowCredentialStatus(t *testing.T) {
 					t.Errorf("showCredentialStatus panicked: %v", r)
 				}
 			}()
-			
+
 			// This would require capturing stdout to fully test
 			// For now we just ensure it doesn't crash
 			showCredentialStatus(tt.platform)
@@ -228,7 +227,7 @@ func TestShowPlatformStatus(t *testing.T) {
 					t.Errorf("showPlatformStatus panicked: %v", r)
 				}
 			}()
-			
+
 			showPlatformStatus(tt.platform)
 		})
 	}
@@ -236,11 +235,11 @@ func TestShowPlatformStatus(t *testing.T) {
 
 func TestSetupBlueskyAuthValidation(t *testing.T) {
 	tests := []struct {
-		name           string
-		username       string
-		appPassword    string
-		expectError    bool
-		errorMessage   string
+		name         string
+		username     string
+		appPassword  string
+		expectError  bool
+		errorMessage string
 	}{
 		{"valid credentials", "user.bsky.social", "abcd-efgh-ijkl-mnop", false, ""},
 		{"empty username", "", "abcd-efgh-ijkl-mnop", true, "username is required"},
@@ -253,14 +252,14 @@ func TestSetupBlueskyAuthValidation(t *testing.T) {
 			// Test validation logic used in setupBlueskyAuth
 			username := strings.TrimSpace(tt.username)
 			appPassword := strings.TrimSpace(tt.appPassword)
-			
+
 			var err error
 			if username == "" {
 				err = fmt.Errorf("username is required")
 			} else if appPassword == "" {
 				err = fmt.Errorf("app password is required")
 			}
-			
+
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -276,12 +275,12 @@ func TestSetupBlueskyAuthValidation(t *testing.T) {
 
 func TestSetupMastodonAuthValidation(t *testing.T) {
 	tests := []struct {
-		name           string
-		instance       string
-		username       string
-		accessToken    string
-		expectError    bool
-		errorMessage   string
+		name         string
+		instance     string
+		username     string
+		accessToken  string
+		expectError  bool
+		errorMessage string
 	}{
 		{"valid credentials", "mastodon.social", "user", "token123", false, ""},
 		{"empty instance", "", "user", "token123", true, "instance is required"},
@@ -295,7 +294,7 @@ func TestSetupMastodonAuthValidation(t *testing.T) {
 			instance := strings.TrimSpace(tt.instance)
 			username := strings.TrimSpace(tt.username)
 			accessToken := strings.TrimSpace(tt.accessToken)
-			
+
 			var err error
 			if instance == "" {
 				err = fmt.Errorf("instance is required")
@@ -304,7 +303,7 @@ func TestSetupMastodonAuthValidation(t *testing.T) {
 			} else if accessToken == "" {
 				err = fmt.Errorf("access token is required")
 			}
-			
+
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -334,7 +333,7 @@ func TestFullUsernameGeneration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test full username generation logic
 			fullUsername := tt.username + "@" + strings.TrimPrefix(tt.instanceURL, "https://")
-			
+
 			if fullUsername != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, fullUsername)
 			}

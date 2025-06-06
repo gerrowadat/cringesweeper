@@ -33,27 +33,27 @@ func TestMastodonClient_RequiresAuth(t *testing.T) {
 
 func TestMastodonClient_ParseUsername(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	tests := []struct {
-		name            string
-		username        string
+		name             string
+		username         string
 		expectedInstance string
-		expectedAcct    string
-		shouldError     bool
+		expectedAcct     string
+		shouldError      bool
 	}{
 		{
-			name:            "full username",
-			username:        "user@mastodon.social",
+			name:             "full username",
+			username:         "user@mastodon.social",
 			expectedInstance: "https://mastodon.social",
-			expectedAcct:    "user",
-			shouldError:     false,
+			expectedAcct:     "user",
+			shouldError:      false,
 		},
 		{
-			name:            "username only",
-			username:        "user",
+			name:             "username only",
+			username:         "user",
 			expectedInstance: "https://mastodon.social",
-			expectedAcct:    "user",
-			shouldError:     false,
+			expectedAcct:     "user",
+			shouldError:      false,
 		},
 		{
 			name:        "invalid format multiple @",
@@ -61,34 +61,34 @@ func TestMastodonClient_ParseUsername(t *testing.T) {
 			shouldError: true,
 		},
 		{
-			name:            "custom instance",
-			username:        "alice@fosstodon.org",
+			name:             "custom instance",
+			username:         "alice@fosstodon.org",
 			expectedInstance: "https://fosstodon.org",
-			expectedAcct:    "alice",
-			shouldError:     false,
+			expectedAcct:     "alice",
+			shouldError:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			instanceURL, acct, err := client.parseUsername(tt.username)
-			
+
 			if tt.shouldError {
 				if err == nil {
 					t.Errorf("Expected error for username %q, got none", tt.username)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error for username %q: %v", tt.username, err)
 				return
 			}
-			
+
 			if instanceURL != tt.expectedInstance {
 				t.Errorf("Expected instance %q, got %q", tt.expectedInstance, instanceURL)
 			}
-			
+
 			if acct != tt.expectedAcct {
 				t.Errorf("Expected acct %q, got %q", tt.expectedAcct, acct)
 			}
@@ -98,7 +98,7 @@ func TestMastodonClient_ParseUsername(t *testing.T) {
 
 func TestMastodonClient_StripHTML(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	tests := []struct {
 		name     string
 		input    string
@@ -168,7 +168,7 @@ func TestMastodonClient_StripHTML(t *testing.T) {
 
 func TestMastodonClient_DeterminePostType(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	tests := []struct {
 		name     string
 		status   mastodonStatus
@@ -224,12 +224,12 @@ func TestMastodonClient_GetAccountID(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/api/v1/accounts/lookup") {
 			t.Errorf("Unexpected API path: %s", r.URL.Path)
 		}
-		
+
 		acct := r.URL.Query().Get("acct")
 		if acct == "" {
 			t.Error("acct parameter should be provided")
 		}
-		
+
 		// Mock response based on acct
 		var response mastodonAccount
 		switch acct {
@@ -252,7 +252,7 @@ func TestMastodonClient_GetAccountID(t *testing.T) {
 				DisplayName: "Generic User",
 			}
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -265,7 +265,7 @@ func TestMastodonClient_GetAccountID(t *testing.T) {
 	t.Run("account lookup structure", func(t *testing.T) {
 		// Test that the client implements the interface
 		var _ SocialClient = client
-		
+
 		// Test that it doesn't panic with invalid input
 		defer func() {
 			if r := recover(); r != nil {
@@ -281,13 +281,13 @@ func TestMastodonClient_FetchUserStatuses(t *testing.T) {
 		if !strings.Contains(r.URL.Path, "/api/v1/accounts/") || !strings.Contains(r.URL.Path, "/statuses") {
 			t.Errorf("Unexpected API path: %s", r.URL.Path)
 		}
-		
+
 		// Check query parameters
 		limit := r.URL.Query().Get("limit")
 		if limit == "" {
 			t.Error("limit parameter should be provided")
 		}
-		
+
 		excludeReplies := r.URL.Query().Get("exclude_replies")
 		if excludeReplies != "true" {
 			t.Error("exclude_replies should be true")
@@ -297,9 +297,9 @@ func TestMastodonClient_FetchUserStatuses(t *testing.T) {
 		now := time.Now()
 		response := []mastodonStatus{
 			{
-				ID:      "1",
-				URL:     "https://mastodon.social/@test/1",
-				Content: "<p>Hello world!</p>",
+				ID:        "1",
+				URL:       "https://mastodon.social/@test/1",
+				Content:   "<p>Hello world!</p>",
 				CreatedAt: now,
 				Account: mastodonAccount{
 					ID:          "123",
@@ -312,7 +312,7 @@ func TestMastodonClient_FetchUserStatuses(t *testing.T) {
 				RepliesCount:    1,
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -323,7 +323,7 @@ func TestMastodonClient_FetchUserStatuses(t *testing.T) {
 	t.Run("fetch statuses structure", func(t *testing.T) {
 		// Test that the client implements the interface properly
 		var _ SocialClient = client
-		
+
 		// Test that it doesn't panic with invalid input
 		defer func() {
 			if r := recover(); r != nil {
@@ -335,12 +335,12 @@ func TestMastodonClient_FetchUserStatuses(t *testing.T) {
 
 func TestMastodonClient_FetchUserPosts(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	t.Run("fetch posts without credentials", func(t *testing.T) {
 		// This should work as it falls back to public API
 		// Note: In a real test, we'd mock the HTTP calls
 		var _ SocialClient = client
-		
+
 		// Test that it doesn't panic with invalid input
 		defer func() {
 			if r := recover(); r != nil {
@@ -354,9 +354,9 @@ func TestMastodonStatusConversion(t *testing.T) {
 	// Test conversion from mastodonStatus to generic Post
 	now := time.Now()
 	status := mastodonStatus{
-		ID:      "123456789",
-		URL:     "https://mastodon.social/@test/123456789",
-		Content: "<p>Hello <strong>world</strong>!</p>",
+		ID:        "123456789",
+		URL:       "https://mastodon.social/@test/123456789",
+		Content:   "<p>Hello <strong>world</strong>!</p>",
 		CreatedAt: now,
 		Account: mastodonAccount{
 			ID:          "user123",
@@ -372,7 +372,7 @@ func TestMastodonStatusConversion(t *testing.T) {
 	}
 
 	client := NewMastodonClient()
-	
+
 	// Test conversion logic (this would be in FetchUserPosts)
 	post := Post{
 		ID:        status.ID,
@@ -383,11 +383,11 @@ func TestMastodonStatusConversion(t *testing.T) {
 		URL:       status.URL,
 		Type:      client.determinePostType(status),
 		Platform:  "mastodon",
-		
+
 		RepostCount: status.ReblogsCount,
 		LikeCount:   status.FavouritesCount,
 		ReplyCount:  status.RepliesCount,
-		
+
 		IsLikedByUser: status.Favourited != nil && *status.Favourited,
 		IsPinned:      status.Pinned != nil && *status.Pinned,
 	}
@@ -396,32 +396,32 @@ func TestMastodonStatusConversion(t *testing.T) {
 		if post.ID != status.ID {
 			t.Errorf("Expected ID %q, got %q", status.ID, post.ID)
 		}
-		
+
 		if post.Author != status.Account.DisplayName {
 			t.Errorf("Expected Author %q, got %q", status.Account.DisplayName, post.Author)
 		}
-		
+
 		if post.Handle != status.Account.Acct {
 			t.Errorf("Expected Handle %q, got %q", status.Account.Acct, post.Handle)
 		}
-		
+
 		expectedContent := "Hello world!"
 		if post.Content != expectedContent {
 			t.Errorf("Expected Content %q, got %q", expectedContent, post.Content)
 		}
-		
+
 		if post.Platform != "mastodon" {
 			t.Errorf("Expected Platform 'mastodon', got %q", post.Platform)
 		}
-		
+
 		if post.LikeCount != status.FavouritesCount {
 			t.Errorf("Expected LikeCount %d, got %d", status.FavouritesCount, post.LikeCount)
 		}
-		
+
 		if !post.IsLikedByUser {
 			t.Error("Expected IsLikedByUser to be true")
 		}
-		
+
 		if post.IsPinned {
 			t.Error("Expected IsPinned to be false")
 		}
@@ -430,11 +430,11 @@ func TestMastodonStatusConversion(t *testing.T) {
 
 func TestMastodonReblogHandling(t *testing.T) {
 	now := time.Now()
-	
+
 	// Create a reblog status
 	originalStatus := mastodonStatus{
-		ID:      "original123",
-		Content: "<p>Original content</p>",
+		ID:        "original123",
+		Content:   "<p>Original content</p>",
 		CreatedAt: now.Add(-1 * time.Hour),
 		Account: mastodonAccount{
 			ID:          "original_user",
@@ -443,7 +443,7 @@ func TestMastodonReblogHandling(t *testing.T) {
 			DisplayName: "Original User",
 		},
 	}
-	
+
 	reblogStatus := mastodonStatus{
 		ID:        "reblog456",
 		Content:   "", // Reblog typically has empty content
@@ -458,7 +458,7 @@ func TestMastodonReblogHandling(t *testing.T) {
 	}
 
 	client := NewMastodonClient()
-	
+
 	t.Run("reblog detection", func(t *testing.T) {
 		postType := client.determinePostType(reblogStatus)
 		if postType != PostTypeRepost {
@@ -474,13 +474,13 @@ func TestMastodonReblogHandling(t *testing.T) {
 			Handle: reblogStatus.Account.Acct,
 			Type:   client.determinePostType(reblogStatus),
 		}
-		
+
 		if reblogStatus.Reblog != nil {
 			post.Type = PostTypeRepost
 			post.OriginalAuthor = reblogStatus.Reblog.Account.DisplayName
 			post.OriginalHandle = reblogStatus.Reblog.Account.Acct
 			post.Content = client.stripHTML(reblogStatus.Reblog.Content)
-			
+
 			post.OriginalPost = &Post{
 				ID:        reblogStatus.Reblog.ID,
 				Author:    reblogStatus.Reblog.Account.DisplayName,
@@ -492,23 +492,23 @@ func TestMastodonReblogHandling(t *testing.T) {
 				Platform:  "mastodon",
 			}
 		}
-		
+
 		if post.Type != PostTypeRepost {
 			t.Errorf("Expected PostTypeRepost, got %v", post.Type)
 		}
-		
+
 		if post.OriginalAuthor != "Original User" {
 			t.Errorf("Expected OriginalAuthor 'Original User', got %q", post.OriginalAuthor)
 		}
-		
+
 		if post.OriginalHandle != "original" {
 			t.Errorf("Expected OriginalHandle 'original', got %q", post.OriginalHandle)
 		}
-		
+
 		if post.Content != "Original content" {
 			t.Errorf("Expected Content 'Original content', got %q", post.Content)
 		}
-		
+
 		if post.OriginalPost == nil {
 			t.Error("Expected OriginalPost to be set")
 		} else {
@@ -528,7 +528,7 @@ func TestMastodonReplyHandling(t *testing.T) {
 	}
 
 	client := NewMastodonClient()
-	
+
 	t.Run("reply detection", func(t *testing.T) {
 		postType := client.determinePostType(replyStatus)
 		if postType != PostTypeReply {
@@ -541,16 +541,16 @@ func TestMastodonReplyHandling(t *testing.T) {
 		post := Post{
 			Type: client.determinePostType(replyStatus),
 		}
-		
+
 		if replyStatus.InReplyToID != nil {
 			post.Type = PostTypeReply
 			post.InReplyToID = *replyStatus.InReplyToID
 		}
-		
+
 		if post.Type != PostTypeReply {
 			t.Errorf("Expected PostTypeReply, got %v", post.Type)
 		}
-		
+
 		if post.InReplyToID != "original123" {
 			t.Errorf("Expected InReplyToID 'original123', got %q", post.InReplyToID)
 		}
@@ -559,20 +559,20 @@ func TestMastodonReplyHandling(t *testing.T) {
 
 func TestMastodonClient_PrunePosts(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	t.Run("prune posts without credentials", func(t *testing.T) {
 		options := PruneOptions{
 			MaxAge: func() *time.Duration { d := 30 * 24 * time.Hour; return &d }(),
 			DryRun: true,
 		}
-		
+
 		// This should fail due to missing credentials
 		result, err := client.PrunePosts("test@mastodon.social", options)
-		
+
 		if err == nil {
 			t.Error("Expected error when no credentials are available")
 		}
-		
+
 		if result != nil {
 			t.Error("Expected nil result when credentials are missing")
 		}
@@ -581,7 +581,7 @@ func TestMastodonClient_PrunePosts(t *testing.T) {
 
 func TestMastodonClient_TruncateContent(t *testing.T) {
 	client := NewMastodonClient()
-	
+
 	tests := []struct {
 		name     string
 		content  string
@@ -673,7 +673,7 @@ func TestMastodonAPIEndpoints(t *testing.T) {
 			case "unreblog status":
 				fullURL = tt.instanceURL + "/api/v1/statuses/" + tt.statusID + "/unreblog"
 			}
-			
+
 			if !strings.Contains(fullURL, tt.expectedPath) {
 				t.Errorf("Expected URL to contain %q, got %q", tt.expectedPath, fullURL)
 			}
@@ -706,7 +706,7 @@ func TestMastodonHTTPMethods(t *testing.T) {
 			case "unfavourite", "unreblog":
 				method = "POST"
 			}
-			
+
 			if method != tt.expectedMethod {
 				t.Errorf("Expected method %q for operation %q, got %q", tt.expectedMethod, tt.operation, method)
 			}
@@ -736,7 +736,7 @@ func TestMastodonAuthenticationHeaders(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test authorization header construction
 			authHeader := "Bearer " + tt.accessToken
-			
+
 			if authHeader != tt.expected {
 				t.Errorf("Expected auth header %q, got %q", tt.expected, authHeader)
 			}
