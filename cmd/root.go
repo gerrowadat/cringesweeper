@@ -15,13 +15,18 @@ import (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "cringesweeper",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "Cross-platform social media post management tool",
+	Long: `CringeSweeper is a command-line tool for managing your social media presence 
+across multiple platforms including Bluesky and Mastodon.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+Key features:
+• List and browse recent posts from your timelines
+• Delete posts based on age, date, and smart preservation rules  
+• Safe dry-run mode to preview deletions before executing
+• Cross-platform authentication setup and management
+• Support for multiple post types (original, reposts, replies, quotes)
+
+Use 'cringesweeper [command] --help' for detailed information about each command.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
