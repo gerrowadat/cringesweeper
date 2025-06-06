@@ -12,11 +12,17 @@ import (
 )
 
 // MastodonClient implements the SocialClient interface for Mastodon
-type MastodonClient struct{}
+type MastodonClient struct {
+	creds          *Credentials
+	instanceURL    string
+	authenticatedClient *http.Client
+}
 
 // NewMastodonClient creates a new Mastodon client
 func NewMastodonClient() *MastodonClient {
-	return &MastodonClient{}
+	return &MastodonClient{
+		authenticatedClient: &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 // GetPlatformName returns the platform name
@@ -83,12 +89,15 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 		// Handle reblogs/reposts
 		if status.Reblog != nil {
 			post.Type = PostTypeRepost
+			// IMPORTANT: For reblogs, post.ID should be the reblog status ID (for unrebogging)
+			// status.ID is the reblog action ID, status.Reblog.ID is the original post ID
+			post.ID = status.ID // This is the reblog action ID we need to unreblog
 			post.OriginalAuthor = status.Reblog.Account.DisplayName
 			post.OriginalHandle = status.Reblog.Account.Acct
 			post.Content = c.stripHTML(status.Reblog.Content)
 			// Create embedded original post
 			post.OriginalPost = &Post{
-				ID:        status.Reblog.ID,
+				ID:        status.Reblog.ID, // Original post ID
 				Author:    status.Reblog.Account.DisplayName,
 				Handle:    status.Reblog.Account.Acct,
 				Content:   c.stripHTML(status.Reblog.Content),
@@ -201,7 +210,8 @@ func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit 
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
 	params.Add("exclude_replies", "true")
-	params.Add("exclude_reblogs", "true")
+	// Include reblogs so we can manage the user's own reblog actions
+	params.Add("exclude_reblogs", "false")
 
 	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
 
@@ -236,7 +246,8 @@ func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID s
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
 	params.Add("exclude_replies", "true")
-	params.Add("exclude_reblogs", "true")
+	// Include reblogs so we can manage the user's own reblog actions
+	params.Add("exclude_reblogs", "false")
 
 	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
 
@@ -307,10 +318,36 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
+	// Parse username to get instance URL  
+	instanceURL, _, err := c.parseUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("invalid username format: %w", err)
+	}
+
 	// Fetch user's posts (we'd need to fetch more than 10 for real pruning)
 	posts, err := c.FetchUserPosts(username, 100) // Fetch more posts for pruning
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch posts: %w", err)
+	}
+
+	// If user wants to unlike posts, also fetch their favorited posts
+	if options.UnlikePosts {
+		favoriteIDs, err := c.fetchFavoriteIDs(instanceURL, creds, 100)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to fetch favorited posts: %v\n", err)
+		} else {
+			// Convert favorite IDs to Post structs for processing
+			for _, favoriteID := range favoriteIDs {
+				favoritePost := Post{
+					ID:        favoriteID,
+					Type:      PostTypeLike,
+					Platform:  "mastodon",
+					CreatedAt: time.Now(), // We don't have the actual favorite time
+					Content:   fmt.Sprintf("Favorited status: %s", favoriteID),
+				}
+				posts = append(posts, favoritePost)
+			}
+		}
 	}
 
 	result := &PruneResult{
@@ -356,22 +393,24 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 			result.PostsPreserved = append(result.PostsPreserved, post)
 			result.PreservedCount++
 		} else {
-			// Determine action based on flags and post type
-			if options.UnlikePosts && post.IsLikedByUser {
+			// Determine action based on post type
+			if post.Type == PostTypeLike {
+				// Handle favorite records - unfavorite them
 				result.PostsToUnlike = append(result.PostsToUnlike, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
 					if err := c.unlikePost(creds, post.ID); err != nil {
-						fmt.Printf("❌ Failed to unlike post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
-						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unlike post %s: %v", post.ID, err))
+						fmt.Printf("❌ Failed to unfavorite post: %v\n", err)
+						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unfavorite post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("👍 Unliked post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), c.truncateContent(post.Content, 50))
+						fmt.Printf("👍 Unfavorited post: %s\n", c.truncateContent(post.Content, 50))
 						result.UnlikedCount++
 					}
 				}
-			} else if options.UnshareReposts && post.Type == PostTypeRepost {
+			} else if post.Type == PostTypeRepost {
+				// Always unreblog for reblog records - these are the user's own reblog actions
 				result.PostsToUnshare = append(result.PostsToUnshare, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
@@ -385,7 +424,8 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 						result.UnsharedCount++
 					}
 				}
-			} else {
+			} else if post.Type == PostTypeOriginal || post.Type == PostTypeReply {
+				// Only delete the user's own original posts and replies
 				result.PostsToDelete = append(result.PostsToDelete, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
@@ -408,18 +448,15 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 
 // deletePost deletes a Mastodon post
 func (c *MastodonClient) deletePost(creds *Credentials, postID string) error {
+	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s", creds.Instance, postID)
 
-	req, err := http.NewRequest("DELETE", url, nil)
+	req, err := c.createAuthenticatedRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.authenticatedClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -435,18 +472,15 @@ func (c *MastodonClient) deletePost(creds *Credentials, postID string) error {
 
 // unlikePost unlikes (unfavourites) a Mastodon post
 func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
+	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unfavourite", creds.Instance, postID)
 
-	req, err := http.NewRequest("POST", url, nil)
+	req, err := c.createAuthenticatedRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.authenticatedClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -462,18 +496,15 @@ func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
 
 // unreblogPost unreblogs (unshares) a Mastodon post
 func (c *MastodonClient) unreblogPost(creds *Credentials, postID string) error {
+	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unreblog", creds.Instance, postID)
 
-	req, err := http.NewRequest("POST", url, nil)
+	req, err := c.createAuthenticatedRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.authenticatedClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -496,6 +527,81 @@ func (c *MastodonClient) determinePostType(status mastodonStatus) PostType {
 		return PostTypeReply
 	}
 	return PostTypeOriginal
+}
+
+// ensureAuthenticated ensures we have cached authentication details
+func (c *MastodonClient) ensureAuthenticated(creds *Credentials, instanceURL string) {
+	// Cache credentials and instance URL for reuse
+	if c.creds == nil || c.creds.AccessToken != creds.AccessToken || c.instanceURL != instanceURL {
+		if c.creds == nil || c.creds.AccessToken != creds.AccessToken {
+			fmt.Printf("🔐 Setting up Mastodon authentication for %s...\n", instanceURL)
+		}
+		c.creds = &Credentials{
+			Instance:    creds.Instance,
+			Username:    creds.Username,
+			AccessToken: creds.AccessToken,
+		}
+		c.instanceURL = instanceURL
+	}
+}
+
+// createAuthenticatedRequest creates an HTTP request with proper authentication headers
+func (c *MastodonClient) createAuthenticatedRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	
+	if c.creds != nil && c.creds.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	return req, nil
+}
+
+// fetchFavoriteIDs fetches IDs of posts that the user has favorited
+func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials, limit int) ([]string, error) {
+	c.ensureAuthenticated(creds, instanceURL)
+	favoritesURL := fmt.Sprintf("%s/api/v1/favourites", instanceURL)
+
+	params := url.Values{}
+	params.Add("limit", strconv.Itoa(limit))
+
+	fullURL := fmt.Sprintf("%s?%s", favoritesURL, params.Encode())
+
+	req, err := c.createAuthenticatedRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.authenticatedClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var statuses []mastodonStatus
+	if err := json.Unmarshal(body, &statuses); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var favoriteIDs []string
+	for _, status := range statuses {
+		favoriteIDs = append(favoriteIDs, status.ID)
+	}
+
+	return favoriteIDs, nil
 }
 
 // truncateContent truncates content for display in progress messages

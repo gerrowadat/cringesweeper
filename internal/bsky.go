@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,11 @@ import (
 )
 
 // BlueskyClient implements the SocialClient interface for Bluesky
-type BlueskyClient struct{}
+type BlueskyClient struct {
+	session    *atpSessionResponse
+	creds      *Credentials
+	sessionExp time.Time // Track when session expires
+}
 
 // NewBlueskyClient creates a new Bluesky client
 func NewBlueskyClient() *BlueskyClient {
@@ -66,10 +71,11 @@ func (c *BlueskyClient) FetchUserPosts(username string, limit int) ([]Post, erro
 			// Note: IsPinned would need to be determined from the feed metadata
 		}
 
-		// Handle reposts/quotes
+		// Handle reposts - these are the user's own repost records, not the original posts
 		if bskyPost.Record.Type == "app.bsky.feed.repost" {
 			post.Type = PostTypeRepost
-			// Note: Full repost data would require additional API calls to get original post
+			// For reposts, the ID should be the repost record URI, not the original post URI
+			post.ID = bskyPost.URI // This is the user's repost record URI
 		}
 
 		// Handle replies
@@ -77,6 +83,9 @@ func (c *BlueskyClient) FetchUserPosts(username string, limit int) ([]Post, erro
 			post.Type = PostTypeReply
 			post.InReplyToID = bskyPost.Record.Reply.Parent.URI
 		}
+
+		// Note: Likes are not returned by getAuthorFeed - they need to be fetched separately
+		// if we want to include them in the pruning process
 
 		genericPosts = append(genericPosts, post)
 	}
@@ -142,8 +151,8 @@ func (c *BlueskyClient) fetchBlueskyPosts(username string, limit int) ([]bluesky
 	params := url.Values{}
 	params.Add("actor", username)
 	params.Add("limit", fmt.Sprintf("%d", limit))
-	params.Add("include_pins", "true")         // Include pinned posts
-	params.Add("filter", "posts_with_replies") // Include replies for complete view
+	params.Add("include_pins", "true")    // Include pinned posts
+	params.Add("filter", "posts_no_replies") // Only get posts and reposts, not replies to avoid confusion
 
 	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
@@ -205,10 +214,26 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
+	// Create session to get authenticated user's DID
+	session, err := c.ensureValidSession(creds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate with Bluesky: %w. This may indicate invalid credentials or DID resolution issues", err)
+	}
+
 	// Fetch user's posts (we'd need to fetch more than 10 for real pruning)
 	posts, err := c.FetchUserPosts(username, 100) // Fetch more posts for pruning
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch posts: %w", err)
+	}
+
+	// If user wants to unlike posts, also fetch their liked posts
+	if options.UnlikePosts {
+		likedPosts, err := c.fetchLikedPosts(session, 100)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to fetch liked posts: %v\n", err)
+		} else {
+			posts = append(posts, likedPosts...)
+		}
 	}
 
 	result := &PruneResult{
@@ -254,13 +279,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 			result.PostsPreserved = append(result.PostsPreserved, post)
 			result.PreservedCount++
 		} else {
-			// Determine action based on flags and post type
-			if options.UnlikePosts && post.IsLikedByUser {
+			// Determine action based on post type
+			if post.Type == PostTypeLike {
+				// Handle like records - delete the like record directly
 				result.PostsToUnlike = append(result.PostsToUnlike, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
-					if err := c.unlikePost(creds, post.ID); err != nil {
+					if err := c.deleteLikeRecord(creds, post.ID); err != nil {
 						fmt.Printf("❌ Failed to unlike post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unlike post %s: %v", post.ID, err))
 						result.ErrorsCount++
@@ -269,12 +295,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 						result.UnlikedCount++
 					}
 				}
-			} else if options.UnshareReposts && post.Type == PostTypeRepost {
+			} else if post.Type == PostTypeRepost {
+				// Always unrepost for repost records - these are the user's own repost actions
 				result.PostsToUnshare = append(result.PostsToUnshare, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
-					if err := c.unrepost(creds, post.ID); err != nil {
+					// For reposts, we need to delete the repost record directly
+					if err := c.deleteRepostRecord(creds, post.ID); err != nil {
 						fmt.Printf("❌ Failed to unrepost from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unrepost post %s: %v", post.ID, err))
 						result.ErrorsCount++
@@ -283,7 +311,15 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 						result.UnsharedCount++
 					}
 				}
-			} else {
+			} else if post.Type == PostTypeOriginal || post.Type == PostTypeReply {
+				// Validate that the post belongs to the authenticated user
+				if err := c.validatePostURI(post.ID, session.DID); err != nil {
+					fmt.Printf("⚠️  Skipping post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
+					result.Errors = append(result.Errors, fmt.Sprintf("Post validation failed %s: %v", post.ID, err))
+					result.ErrorsCount++
+					continue
+				}
+
 				result.PostsToDelete = append(result.PostsToDelete, post)
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
@@ -327,6 +363,160 @@ type atpSessionResponse struct {
 	DID        string `json:"did"`
 }
 
+// invalidateSession clears the current session (useful when credentials change)
+func (c *BlueskyClient) invalidateSession() {
+	c.session = nil
+	c.creds = nil
+	c.sessionExp = time.Time{}
+}
+
+// ensureValidSession ensures we have a valid session, creating/refreshing as needed
+func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionResponse, error) {
+	// If we don't have a session or credentials changed, create new session
+	if c.session == nil || c.creds == nil || 
+		c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword {
+		if c.creds != nil && (c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword) {
+			fmt.Printf("🔄 Credentials changed, creating new Bluesky session...\n")
+		} else {
+			fmt.Printf("🔐 Creating new Bluesky session...\n")
+		}
+		return c.createNewSession(creds)
+	}
+	
+	// If session is expired or about to expire (within 5 minutes), try to refresh
+	if time.Now().After(c.sessionExp.Add(-5 * time.Minute)) {
+		fmt.Printf("🔄 Refreshing Bluesky session using refresh token...\n")
+		refreshedSession, err := c.refreshSession()
+		if err != nil {
+			// If refresh fails, fall back to creating a new session
+			fmt.Printf("⚠️  Refresh failed, creating new session: %v\n", err)
+			return c.createNewSession(creds)
+		}
+		return refreshedSession, nil
+	}
+	
+	// Reusing existing session
+	return c.session, nil
+}
+
+// refreshSession uses the refresh token to extend the current session
+func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
+	if c.session == nil || c.session.RefreshJwt == "" {
+		return nil, fmt.Errorf("no valid refresh token available")
+	}
+
+	refreshURL := "https://bsky.social/xrpc/com.atproto.server.refreshSession"
+
+	req, err := http.NewRequest("POST", refreshURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh request: %w", err)
+	}
+
+	// Use the refresh token as authorization
+	req.Header.Set("Authorization", "Bearer "+c.session.RefreshJwt)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("session refresh failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read refresh response: %w", err)
+	}
+
+	var refreshedSession atpSessionResponse
+	if err := json.Unmarshal(body, &refreshedSession); err != nil {
+		return nil, fmt.Errorf("failed to parse refresh response: %w", err)
+	}
+
+	// Update stored session with new tokens
+	c.session = &refreshedSession
+	
+	// Try to parse actual expiration from refreshed JWT, fall back to 24 hours
+	if expTime, err := c.parseJWTExpiration(refreshedSession.AccessJwt); err == nil {
+		c.sessionExp = expTime
+		fmt.Printf("✅ Session refreshed, expires at %s\n", expTime.Format("15:04:05"))
+	} else {
+		// Fallback to default 24 hours
+		c.sessionExp = time.Now().Add(24 * time.Hour)
+		fmt.Printf("✅ Session refreshed with default 24h expiration\n")
+	}
+
+	return &refreshedSession, nil
+}
+
+// parseJWTExpiration extracts expiration time from JWT token
+func (c *BlueskyClient) parseJWTExpiration(token string) (time.Time, error) {
+	// JWT format: header.payload.signature
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid JWT format")
+	}
+	
+	// Decode the payload (second part)
+	payload := parts[1]
+	// Add padding if necessary for base64 decoding
+	if len(payload)%4 != 0 {
+		payload += strings.Repeat("=", 4-len(payload)%4)
+	}
+	
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to decode JWT payload: %w", err)
+	}
+	
+	var claims struct {
+		Exp int64 `json:"exp"` // Unix timestamp
+	}
+	
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse JWT claims: %w", err)
+	}
+	
+	if claims.Exp == 0 {
+		// No expiration in token, fall back to default
+		return time.Now().Add(24 * time.Hour), nil
+	}
+	
+	return time.Unix(claims.Exp, 0), nil
+}
+
+// createNewSession creates a fresh session and stores it
+func (c *BlueskyClient) createNewSession(creds *Credentials) (*atpSessionResponse, error) {
+	session, err := c.createSession(creds)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Store session and credentials for reuse
+	c.session = session
+	c.creds = &Credentials{
+		Username:    creds.Username,
+		AppPassword: creds.AppPassword,
+	}
+	
+	// Try to parse actual expiration from JWT, fall back to 24 hours
+	if expTime, err := c.parseJWTExpiration(session.AccessJwt); err == nil {
+		c.sessionExp = expTime
+		fmt.Printf("✅ Session created, expires at %s\n", expTime.Format("15:04:05"))
+	} else {
+		// Fallback to default 24 hours
+		c.sessionExp = time.Now().Add(24 * time.Hour)
+		fmt.Printf("✅ Session created with default 24h expiration\n")
+	}
+	
+	return session, nil
+}
+
 // createSession authenticates with AT Protocol and returns access token
 func (c *BlueskyClient) createSession(creds *Credentials) (*atpSessionResponse, error) {
 	sessionURL := "https://bsky.social/xrpc/com.atproto.server.createSession"
@@ -357,7 +547,7 @@ func (c *BlueskyClient) createSession(creds *Credentials) (*atpSessionResponse, 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("session creation failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("session creation failed with status %d: %s. This may indicate invalid credentials or DID resolution issues", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -375,9 +565,9 @@ func (c *BlueskyClient) createSession(creds *Credentials) (*atpSessionResponse, 
 
 // deletePost deletes a Bluesky post using AT Protocol
 func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
-	session, err := c.createSession(creds)
+	session, err := c.ensureValidSession(creds)
 	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
+		return fmt.Errorf("failed to ensure valid session: %w", err)
 	}
 
 	// Extract collection and rkey from URI
@@ -391,10 +581,15 @@ func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
 	collection := strings.Join(parts[3:len(parts)-1], "/")
 	rkey := parts[len(parts)-1]
 
+	// Verify that the DID from the post URI matches the authenticated user's DID
+	if did != session.DID {
+		return fmt.Errorf("DID mismatch: post DID %s does not match authenticated user DID %s. This suggests the post belongs to a different user or there's a DID resolution issue", did, session.DID)
+	}
+
 	deleteURL := "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
 
 	deleteData := map[string]string{
-		"repo":       did,
+		"repo":       session.DID, // Use authenticated user's DID instead of post DID
 		"collection": collection,
 		"rkey":       rkey,
 	}
@@ -421,7 +616,7 @@ func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete request failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("delete request failed with status %d: %s. DID used: %s, rkey: %s", resp.StatusCode, string(body), session.DID, rkey)
 	}
 
 	return nil
@@ -429,9 +624,9 @@ func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
 
 // unlikePost removes a like from a Bluesky post
 func (c *BlueskyClient) unlikePost(creds *Credentials, postURI string) error {
-	session, err := c.createSession(creds)
+	session, err := c.ensureValidSession(creds)
 	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
+		return fmt.Errorf("failed to ensure valid session: %w", err)
 	}
 
 	// First, we need to find the like record for this post
@@ -487,9 +682,9 @@ func (c *BlueskyClient) unlikePost(creds *Credentials, postURI string) error {
 
 // unrepost removes a repost from Bluesky
 func (c *BlueskyClient) unrepost(creds *Credentials, postURI string) error {
-	session, err := c.createSession(creds)
+	session, err := c.ensureValidSession(creds)
 	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
+		return fmt.Errorf("failed to ensure valid session: %w", err)
 	}
 
 	// Find the repost record for this post
@@ -702,6 +897,223 @@ func (c *BlueskyClient) findRepostRecord(session *atpSessionResponse, postURI st
 	}
 
 	return "", fmt.Errorf("no repost record found for post %s", postURI)
+}
+
+// resolveDID attempts to resolve a DID to verify it exists and get current information
+func (c *BlueskyClient) resolveDID(did string) error {
+	resolveURL := fmt.Sprintf("https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=%s", did)
+	
+	resp, err := http.Get(resolveURL)
+	if err != nil {
+		return fmt.Errorf("failed to resolve DID %s: %w", did, err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("DID resolution failed for %s with status %d: %s", did, resp.StatusCode, string(body))
+	}
+	
+	return nil
+}
+
+// validatePostURI validates that a post URI belongs to the authenticated user
+func (c *BlueskyClient) validatePostURI(postURI string, userDID string) error {
+	parts := strings.Split(postURI, "/")
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid post URI format: %s", postURI)
+	}
+	
+	postDID := parts[2]
+	if postDID != userDID {
+		return fmt.Errorf("post DID %s does not match authenticated user DID %s", postDID, userDID)
+	}
+	
+	return nil
+}
+
+// fetchLikedPosts fetches posts that the user has liked
+func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) ([]Post, error) {
+	listURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords"
+
+	params := url.Values{}
+	params.Add("repo", session.DID)
+	params.Add("collection", "app.bsky.feed.like")
+	params.Add("limit", fmt.Sprintf("%d", limit))
+
+	fullURL := fmt.Sprintf("%s?%s", listURL, params.Encode())
+
+	req, err := http.NewRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create list request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read list response: %w", err)
+	}
+
+	var listResponse struct {
+		Records []struct {
+			URI   string `json:"uri"`
+			Value struct {
+				Subject struct {
+					URI string `json:"uri"`
+				} `json:"subject"`
+				CreatedAt time.Time `json:"createdAt"`
+			} `json:"value"`
+		} `json:"records"`
+	}
+
+	if err := json.Unmarshal(body, &listResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse list response: %w", err)
+	}
+
+	var likedPosts []Post
+	for _, record := range listResponse.Records {
+		post := Post{
+			ID:        record.URI, // This is the like record URI, not the original post
+			Type:      PostTypeLike,
+			Platform:  "bluesky",
+			CreatedAt: record.Value.CreatedAt,
+			Content:   fmt.Sprintf("Liked: %s", record.Value.Subject.URI), // Show what was liked
+		}
+		likedPosts = append(likedPosts, post)
+	}
+
+	return likedPosts, nil
+}
+
+// deleteLikeRecord deletes a like record directly
+func (c *BlueskyClient) deleteLikeRecord(creds *Credentials, likeURI string) error {
+	session, err := c.ensureValidSession(creds)
+	if err != nil {
+		return fmt.Errorf("failed to ensure valid session: %w", err)
+	}
+
+	// Extract collection and rkey from like URI
+	// URI format: at://did:plc:xxx/app.bsky.feed.like/rkey
+	parts := strings.Split(likeURI, "/")
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid like URI format: %s", likeURI)
+	}
+
+	did := parts[2]
+	collection := strings.Join(parts[3:len(parts)-1], "/")
+	rkey := parts[len(parts)-1]
+
+	// Verify that the DID from the like URI matches the authenticated user's DID
+	if did != session.DID {
+		return fmt.Errorf("DID mismatch: like DID %s does not match authenticated user DID %s", did, session.DID)
+	}
+
+	deleteURL := "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
+
+	deleteData := map[string]string{
+		"repo":       session.DID,
+		"collection": collection,
+		"rkey":       rkey,
+	}
+
+	jsonData, err := json.Marshal(deleteData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delete data: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", deleteURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete like failed with status %d: %s. DID used: %s, rkey: %s", resp.StatusCode, string(body), session.DID, rkey)
+	}
+
+	return nil
+}
+
+// deleteRepostRecord deletes a repost record directly (simpler than unrepost)
+func (c *BlueskyClient) deleteRepostRecord(creds *Credentials, repostURI string) error {
+	session, err := c.ensureValidSession(creds)
+	if err != nil {
+		return fmt.Errorf("failed to ensure valid session: %w", err)
+	}
+
+	// Extract collection and rkey from repost URI
+	// URI format: at://did:plc:xxx/app.bsky.feed.repost/rkey
+	parts := strings.Split(repostURI, "/")
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid repost URI format: %s", repostURI)
+	}
+
+	did := parts[2]
+	collection := strings.Join(parts[3:len(parts)-1], "/")
+	rkey := parts[len(parts)-1]
+
+	// Verify that the DID from the repost URI matches the authenticated user's DID
+	if did != session.DID {
+		return fmt.Errorf("DID mismatch: repost DID %s does not match authenticated user DID %s", did, session.DID)
+	}
+
+	deleteURL := "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
+
+	deleteData := map[string]string{
+		"repo":       session.DID,
+		"collection": collection,
+		"rkey":       rkey,
+	}
+
+	jsonData, err := json.Marshal(deleteData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delete data: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", deleteURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete repost failed with status %d: %s. DID used: %s, rkey: %s", resp.StatusCode, string(body), session.DID, rkey)
+	}
+
+	return nil
 }
 
 // truncateContent truncates content for display in progress messages

@@ -14,13 +14,18 @@ import (
 var pruneCmd = &cobra.Command{
 	Use:   "prune [username]",
 	Short: "Delete posts based on age, date, and preservation rules",
-	Long: `Delete posts from your social media accounts based on configurable criteria.
+	Long: `Delete posts, unlike posts, and unshare reposts from your social media accounts based on configurable criteria.
 
-Posts can be deleted by maximum age (e.g., older than 30 days) or before a specific 
+What gets processed:
+- Original posts you created: Deleted permanently
+- Posts you've reposted: Removes your repost (unrepost)
+- Posts you've liked: Removes your like (unlike) - only when --unlike-posts is used
+
+Posts can be processed by maximum age (e.g., older than 30 days) or before a specific 
 date. Smart preservation rules protect important content like pinned posts and 
 posts you've liked.
 
-ALWAYS use --dry-run first to preview what would be deleted. Post deletion is 
+ALWAYS use --dry-run first to preview what would be processed. Actions are 
 permanent and cannot be undone. Requires authentication for the target platform.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -122,7 +127,15 @@ permanent and cannot be undone. Requires authentication for the target platform.
 }
 
 func parseDuration(s string) (time.Duration, error) {
-	// Support formats like "30d", "7d", "24h", "1y"
+	// First try standard Go duration parsing (handles formats like "2h30m", "1h30m45s")
+	if duration, err := time.ParseDuration(s); err == nil {
+		if duration < 0 {
+			return 0, fmt.Errorf("negative durations are not allowed")
+		}
+		return duration, nil
+	}
+
+	// Support custom formats like "30d", "7d", "1y"
 	if len(s) < 2 {
 		return 0, fmt.Errorf("invalid duration format")
 	}
@@ -134,9 +147,11 @@ func parseDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid duration value: %w", err)
 	}
 
+	if value < 0 {
+		return 0, fmt.Errorf("negative durations are not allowed")
+	}
+
 	switch unit {
-	case "h":
-		return time.Duration(value) * time.Hour, nil
 	case "d":
 		return time.Duration(value) * 24 * time.Hour, nil
 	case "w":
@@ -146,8 +161,7 @@ func parseDuration(s string) (time.Duration, error) {
 	case "y":
 		return time.Duration(value) * 365 * 24 * time.Hour, nil
 	default:
-		// Try standard Go duration parsing
-		return time.ParseDuration(s)
+		return 0, fmt.Errorf("unsupported duration unit: %s", unit)
 	}
 }
 
@@ -278,6 +292,9 @@ func truncateContent(content string, maxLen int) string {
 	content = strings.ReplaceAll(content, "\n", " ")
 	if len(content) <= maxLen {
 		return content
+	}
+	if maxLen <= 3 {
+		return "..."
 	}
 	return content[:maxLen-3] + "..."
 }
