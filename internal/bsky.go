@@ -496,11 +496,6 @@ type atpSessionResponse struct {
 	DID        string `json:"did"`
 }
 
-// invalidateSession clears the current session (useful when credentials change)
-func (c *BlueskyClient) invalidateSession() {
-	c.session = nil
-	c.sessionManager.ClearSession()
-}
 
 // ensureValidSession ensures we have a valid session, creating/refreshing as needed
 func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionResponse, error) {
@@ -770,120 +765,7 @@ func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
 	return nil
 }
 
-// unlikePost removes a like from a Bluesky post
-func (c *BlueskyClient) unlikePost(creds *Credentials, postURI string) error {
-	session, err := c.ensureValidSession(creds)
-	if err != nil {
-		return fmt.Errorf("failed to ensure valid session: %w", err)
-	}
 
-	// First, we need to find the like record for this post
-	// This would require listing the user's likes and finding the one for this URI
-	// For now, we'll use a simplified approach that attempts to delete based on the post URI
-
-	// In AT Protocol, likes are stored as app.bsky.feed.like records
-	// We need to find the specific like record's rkey for this post
-	likeRkey, err := c.findLikeRecord(session, postURI)
-	if err != nil {
-		return fmt.Errorf("failed to find like record: %w", err)
-	}
-
-	if likeRkey == "" {
-		return fmt.Errorf("no like record found for post %s", postURI)
-	}
-
-	deleteURL := "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
-
-	deleteData := map[string]string{
-		"repo":       session.DID,
-		"collection": "app.bsky.feed.like",
-		"rkey":       likeRkey,
-	}
-
-	jsonData, err := json.Marshal(deleteData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal unlike data: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", deleteURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create unlike request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	LogHTTPRequest("POST", deleteURL)
-	resp, err := client.Do(req)
-	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
-	if err != nil {
-		return fmt.Errorf("unlike request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("unlike request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-// unrepost removes a repost from Bluesky
-func (c *BlueskyClient) unrepost(creds *Credentials, postURI string) error {
-	session, err := c.ensureValidSession(creds)
-	if err != nil {
-		return fmt.Errorf("failed to ensure valid session: %w", err)
-	}
-
-	// Find the repost record for this post
-	repostRkey, err := c.findRepostRecord(session, postURI)
-	if err != nil {
-		return fmt.Errorf("failed to find repost record: %w", err)
-	}
-
-	if repostRkey == "" {
-		return fmt.Errorf("no repost record found for post %s", postURI)
-	}
-
-	deleteURL := "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
-
-	deleteData := map[string]string{
-		"repo":       session.DID,
-		"collection": "app.bsky.feed.repost",
-		"rkey":       repostRkey,
-	}
-
-	jsonData, err := json.Marshal(deleteData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal unrepost data: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", deleteURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create unrepost request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	LogHTTPRequest("POST", deleteURL)
-	resp, err := client.Do(req)
-	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
-	if err != nil {
-		return fmt.Errorf("unrepost request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("unrepost request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
-}
 
 // findLikeRecord finds the rkey for a like record of a specific post
 func (c *BlueskyClient) findLikeRecord(session *atpSessionResponse, postURI string) (string, error) {
@@ -1055,25 +937,6 @@ func (c *BlueskyClient) findRepostRecord(session *atpSessionResponse, postURI st
 	return "", fmt.Errorf("no repost record found for post %s", postURI)
 }
 
-// resolveDID attempts to resolve a DID to verify it exists and get current information
-func (c *BlueskyClient) resolveDID(did string) error {
-	resolveURL := fmt.Sprintf("https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=%s", did)
-
-	LogHTTPRequest("GET", resolveURL)
-	resp, err := http.Get(resolveURL)
-	LogHTTPResponse("GET", resolveURL, resp.StatusCode, resp.Status)
-	if err != nil {
-		return fmt.Errorf("failed to resolve DID %s: %w", did, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("DID resolution failed for %s with status %d: %s", did, resp.StatusCode, string(body))
-	}
-
-	return nil
-}
 
 // validatePostURI validates that a post URI belongs to the authenticated user
 func (c *BlueskyClient) validatePostURI(postURI string, userDID string) error {
