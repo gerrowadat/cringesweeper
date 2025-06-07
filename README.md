@@ -23,12 +23,38 @@ A command-line tool for managing your social media presence across multiple plat
 ```bash
 git clone https://github.com/gerrowadat/cringesweeper.git
 cd cringesweeper
+
+# Simple build
 go build
+
+# Build with version information (recommended)
+./build.sh
+
+# Or manual build with version
+go build -ldflags "-X github.com/gerrowadat/cringesweeper/internal.Version=0.0.1"
+```
+
+### Docker Image
+
+```bash
+# Build Docker image with version information
+docker build \
+  --build-arg VERSION=0.0.1 \
+  --build-arg COMMIT=$(git rev-parse HEAD) \
+  --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t cringesweeper:0.0.1 .
+
+# Run server mode
+docker run -d -p 8080:8080 \
+  -e BLUESKY_USERNAME=user.bsky.social \
+  -e BLUESKY_APP_PASSWORD=your-app-password \
+  cringesweeper:0.0.1 server --platform=bluesky --max-post-age=30d
 ```
 
 ### Prerequisites
 
-- Go 1.24.2 or later
+- Go 1.24.2 or later (for source builds)
+- Docker (for containerized deployment)
 - Access to your social media accounts for authentication
 
 ## Quick Start
