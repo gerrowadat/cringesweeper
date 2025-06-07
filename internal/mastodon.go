@@ -13,15 +13,15 @@ import (
 
 // MastodonClient implements the SocialClient interface for Mastodon
 type MastodonClient struct {
-	creds               *Credentials
+	sessionManager      *SessionManager
+	authenticatedClient *AuthenticatedHTTPClient
 	instanceURL         string
-	authenticatedClient *http.Client
 }
 
 // NewMastodonClient creates a new Mastodon client
 func NewMastodonClient() *MastodonClient {
 	return &MastodonClient{
-		authenticatedClient: &http.Client{Timeout: 30 * time.Second},
+		sessionManager: NewSessionManager("mastodon"),
 	}
 }
 
@@ -405,7 +405,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unfavorite post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("👍 Unfavorited post: %s\n", c.truncateContent(post.Content, 50))
+						fmt.Printf("👍 Unfavorited post: %s\n", TruncateContent(post.Content, 50))
 						result.UnlikedCount++
 					}
 				}
@@ -420,7 +420,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unreblog post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("🔄 Unshared reblog from %s: %s\n", post.CreatedAt.Format("2006-01-02"), c.truncateContent(post.Content, 50))
+						fmt.Printf("🔄 Unshared reblog from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnsharedCount++
 					}
 				}
@@ -435,7 +435,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to delete post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), c.truncateContent(post.Content, 50))
+						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.DeletedCount++
 					}
 				}
@@ -451,12 +451,12 @@ func (c *MastodonClient) deletePost(creds *Credentials, postID string) error {
 	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s", creds.Instance, postID)
 
-	req, err := c.createAuthenticatedRequest("DELETE", url, nil)
+	req, err := c.authenticatedClient.CreateRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.authenticatedClient.Do(req)
+	resp, err := c.authenticatedClient.DoRequest(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -475,12 +475,12 @@ func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
 	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unfavourite", creds.Instance, postID)
 
-	req, err := c.createAuthenticatedRequest("POST", url, nil)
+	req, err := c.authenticatedClient.CreateRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.authenticatedClient.Do(req)
+	resp, err := c.authenticatedClient.DoRequest(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -499,12 +499,12 @@ func (c *MastodonClient) unreblogPost(creds *Credentials, postID string) error {
 	c.ensureAuthenticated(creds, creds.Instance)
 	url := fmt.Sprintf("%s/api/v1/statuses/%s/unreblog", creds.Instance, postID)
 
-	req, err := c.createAuthenticatedRequest("POST", url, nil)
+	req, err := c.authenticatedClient.CreateRequest("POST", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.authenticatedClient.Do(req)
+	resp, err := c.authenticatedClient.DoRequest(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -532,33 +532,16 @@ func (c *MastodonClient) determinePostType(status mastodonStatus) PostType {
 // ensureAuthenticated ensures we have cached authentication details
 func (c *MastodonClient) ensureAuthenticated(creds *Credentials, instanceURL string) {
 	// Cache credentials and instance URL for reuse
-	if c.creds == nil || c.creds.AccessToken != creds.AccessToken || c.instanceURL != instanceURL {
-		if c.creds == nil || c.creds.AccessToken != creds.AccessToken {
+	if c.sessionManager.HasCredentialsChanged(creds) || c.instanceURL != instanceURL {
+		if c.sessionManager.HasCredentialsChanged(creds) {
 			fmt.Printf("🔐 Setting up Mastodon authentication for %s...\n", instanceURL)
 		}
-		c.creds = &Credentials{
-			Instance:    creds.Instance,
-			Username:    creds.Username,
-			AccessToken: creds.AccessToken,
-		}
+		c.sessionManager.UpdateSession(creds.AccessToken, "", time.Now().Add(24*time.Hour), creds)
+		c.authenticatedClient = NewAuthenticatedHTTPClient(creds.AccessToken, instanceURL, 30*time.Second)
 		c.instanceURL = instanceURL
 	}
 }
 
-// createAuthenticatedRequest creates an HTTP request with proper authentication headers
-func (c *MastodonClient) createAuthenticatedRequest(method, url string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return nil, err
-	}
-
-	if c.creds != nil && c.creds.AccessToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.creds.AccessToken)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	return req, nil
-}
 
 // fetchFavoriteIDs fetches IDs of posts that the user has favorited
 func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials, limit int) ([]string, error) {
@@ -570,12 +553,12 @@ func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials
 
 	fullURL := fmt.Sprintf("%s?%s", favoritesURL, params.Encode())
 
-	req, err := c.createAuthenticatedRequest("GET", fullURL, nil)
+	req, err := c.authenticatedClient.CreateRequest("GET", fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.authenticatedClient.Do(req)
+	resp, err := c.authenticatedClient.DoRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

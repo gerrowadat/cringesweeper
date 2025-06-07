@@ -1,6 +1,14 @@
 package internal
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
 
 // PostType represents the type of social media post
 type PostType string
@@ -102,4 +110,292 @@ func GetClient(platform string) (SocialClient, bool) {
 		return nil, false
 	}
 	return constructor(), true
+}
+
+// HTTPClientConfig holds configuration for HTTP clients
+type HTTPClientConfig struct {
+	Timeout time.Duration
+}
+
+// CreateHTTPClient creates a standardized HTTP client with proper timeouts
+func CreateHTTPClient(config HTTPClientConfig) *http.Client {
+	if config.Timeout == 0 {
+		config.Timeout = 30 * time.Second
+	}
+	return &http.Client{
+		Timeout: config.Timeout,
+	}
+}
+
+// SessionManager provides common session management functionality
+type SessionManager struct {
+	credentials   *Credentials
+	accessToken   string
+	refreshToken  string
+	sessionExpiry time.Time
+	platform      string
+}
+
+// NewSessionManager creates a new session manager
+func NewSessionManager(platform string) *SessionManager {
+	return &SessionManager{
+		platform: platform,
+	}
+}
+
+// IsSessionValid checks if the current session is still valid
+func (sm *SessionManager) IsSessionValid() bool {
+	return sm.accessToken != "" && time.Now().Before(sm.sessionExpiry.Add(-5*time.Minute))
+}
+
+// HasCredentialsChanged checks if credentials have changed from the cached ones
+func (sm *SessionManager) HasCredentialsChanged(creds *Credentials) bool {
+	if sm.credentials == nil {
+		return true
+	}
+	
+	switch sm.platform {
+	case "bluesky":
+		return sm.credentials.Username != creds.Username || sm.credentials.AppPassword != creds.AppPassword
+	case "mastodon":
+		return sm.credentials.AccessToken != creds.AccessToken || sm.credentials.Instance != creds.Instance
+	default:
+		return true
+	}
+}
+
+// UpdateSession updates the session with new tokens and expiry
+func (sm *SessionManager) UpdateSession(accessToken, refreshToken string, expiry time.Time, creds *Credentials) {
+	sm.accessToken = accessToken
+	sm.refreshToken = refreshToken
+	sm.sessionExpiry = expiry
+	sm.credentials = &Credentials{
+		Username:    creds.Username,
+		AppPassword: creds.AppPassword,
+		AccessToken: creds.AccessToken,
+		Instance:    creds.Instance,
+	}
+}
+
+// GetAccessToken returns the current access token
+func (sm *SessionManager) GetAccessToken() string {
+	return sm.accessToken
+}
+
+// GetRefreshToken returns the current refresh token
+func (sm *SessionManager) GetRefreshToken() string {
+	return sm.refreshToken
+}
+
+// ClearSession clears the current session
+func (sm *SessionManager) ClearSession() {
+	sm.credentials = nil
+	sm.accessToken = ""
+	sm.refreshToken = ""
+	sm.sessionExpiry = time.Time{}
+}
+
+// AuthenticatedHTTPClient provides common authenticated HTTP request functionality
+type AuthenticatedHTTPClient struct {
+	client      *http.Client
+	accessToken string
+	baseURL     string
+}
+
+// NewAuthenticatedHTTPClient creates a new authenticated HTTP client
+func NewAuthenticatedHTTPClient(accessToken, baseURL string, timeout time.Duration) *AuthenticatedHTTPClient {
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	
+	return &AuthenticatedHTTPClient{
+		client:      &http.Client{Timeout: timeout},
+		accessToken: accessToken,
+		baseURL:     baseURL,
+	}
+}
+
+// CreateRequest creates an HTTP request with authentication headers
+func (ahc *AuthenticatedHTTPClient) CreateRequest(method, path string, body io.Reader) (*http.Request, error) {
+	var url string
+	if strings.HasPrefix(path, "http") {
+		url = path
+	} else {
+		url = ahc.baseURL + path
+	}
+	
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	
+	if ahc.accessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+ahc.accessToken)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	return req, nil
+}
+
+// DoRequest executes an HTTP request and returns the response
+func (ahc *AuthenticatedHTTPClient) DoRequest(req *http.Request) (*http.Response, error) {
+	return ahc.client.Do(req)
+}
+
+// ParseErrorResponse extracts error information from HTTP response
+func ParseErrorResponse(resp *http.Response) error {
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+}
+
+// TruncateContent truncates content for display in progress messages
+func TruncateContent(content string, maxLen int) string {
+	// Replace newlines with spaces for display
+	content = strings.ReplaceAll(content, "\n", " ")
+	if len(content) <= maxLen {
+		return content
+	}
+	if maxLen <= 3 {
+		return "..."
+	}
+	return content[:maxLen-3] + "..."
+}
+
+// RateLimiter provides common rate limiting functionality
+type RateLimiter struct {
+	delay time.Duration
+}
+
+// NewRateLimiter creates a new rate limiter with the specified delay
+func NewRateLimiter(delay time.Duration) *RateLimiter {
+	return &RateLimiter{delay: delay}
+}
+
+// Wait sleeps for the configured delay
+func (rl *RateLimiter) Wait() {
+	if rl.delay > 0 {
+		time.Sleep(rl.delay)
+	}
+}
+
+// APIListRequest represents a common pattern for paginated list requests
+type APIListRequest struct {
+	URL        string
+	Params     url.Values
+	Limit      int
+	Collection string // For AT Protocol
+	Repo       string // For AT Protocol
+}
+
+// ExecuteListRequest executes a paginated list request and returns the response body
+func ExecuteListRequest(client *AuthenticatedHTTPClient, request APIListRequest) ([]byte, error) {
+	params := url.Values{}
+	for k, v := range request.Params {
+		params[k] = v
+	}
+	
+	if request.Limit > 0 {
+		params.Add("limit", fmt.Sprintf("%d", request.Limit))
+	}
+	
+	if request.Collection != "" {
+		params.Add("collection", request.Collection)
+	}
+	
+	if request.Repo != "" {
+		params.Add("repo", request.Repo)
+	}
+	
+	fullURL := request.URL
+	if len(params) > 0 {
+		fullURL += "?" + params.Encode()
+	}
+	
+	req, err := client.CreateRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	
+	resp, err := client.DoRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return nil, ParseErrorResponse(resp)
+	}
+	
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	
+	return body, nil
+}
+
+// DeleteRecordRequest represents a common delete record request
+type DeleteRecordRequest struct {
+	Repo       string
+	Collection string
+	RKey       string
+}
+
+// ExecuteDeleteRequest executes a delete record request
+func ExecuteDeleteRequest(client *AuthenticatedHTTPClient, deleteURL string, request DeleteRecordRequest) error {
+	deleteData := map[string]string{
+		"repo":       request.Repo,
+		"collection": request.Collection,
+		"rkey":       request.RKey,
+	}
+	
+	jsonData, err := json.Marshal(deleteData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delete data: %w", err)
+	}
+	
+	req, err := client.CreateRequest("POST", deleteURL, strings.NewReader(string(jsonData)))
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+	
+	resp, err := client.DoRequest(req)
+	if err != nil {
+		return fmt.Errorf("delete request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return ParseErrorResponse(resp)
+	}
+	
+	return nil
+}
+
+// ExtractPostIDFromURI extracts the post ID from a URI
+func ExtractPostIDFromURI(uri string) string {
+	if len(uri) > 0 {
+		parts := []rune(uri)
+		for i := len(parts) - 1; i >= 0; i-- {
+			if parts[i] == '/' {
+				return string(parts[i+1:])
+			}
+		}
+	}
+	return ""
+}
+
+// ValidateURIOwnership validates that a URI belongs to the specified owner DID/ID
+func ValidateURIOwnership(uri, ownerID string) error {
+	parts := strings.Split(uri, "/")
+	if len(parts) < 3 {
+		return fmt.Errorf("invalid URI format: %s", uri)
+	}
+	
+	uriOwner := parts[2]
+	if uriOwner != ownerID {
+		return fmt.Errorf("URI owner %s does not match expected owner %s", uriOwner, ownerID)
+	}
+	
+	return nil
 }

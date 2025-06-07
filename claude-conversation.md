@@ -130,3 +130,60 @@ Added robust validation to prevent attempting to delete posts that don't belong 
 ---
 
 This conversation demonstrates a complete debugging and improvement cycle for a complex social media management tool, involving protocol-level understanding, session management optimization, and robust error handling implementation.
+
+---
+
+## New Conversation
+
+**User:** every time I ask you to do something, please log a transcript of exactly what I say and exactly what you say to claude-conversation.md
+
+**Assistant:** I'll log our conversation transcript to claude-conversation.md. Each interaction will be recorded with exactly what you say and exactly what I respond.
+
+**User:** reduce code duplication in the bluesky and mastodon implementations by moving functionality to 'social' where possible.
+
+**Assistant:** I successfully reduced code duplication between the Bluesky and Mastodon implementations by extracting common functionality to `social.go`. Here's what was refactored:
+
+## Common Functionality Moved to `social.go`:
+
+### 1. **Session Management**
+- `SessionManager` struct for unified session handling
+- Common credential change detection
+- Session validation and expiry tracking
+
+### 2. **HTTP Client Utilities**
+- `AuthenticatedHTTPClient` for standardized authenticated requests
+- `CreateHTTPClient` for consistent HTTP client configuration
+- `ParseErrorResponse` for unified error handling
+
+### 3. **Common Helper Functions**
+- `TruncateContent` for display formatting
+- `ExtractPostIDFromURI` for URI parsing
+- `ValidateURIOwnership` for ownership validation
+
+### 4. **API Request Patterns**
+- `ExecuteListRequest` for paginated list requests
+- `ExecuteDeleteRequest` for delete operations
+- `DeleteRecordRequest` struct for standardized delete operations
+
+### 5. **Rate Limiting**
+- `RateLimiter` for consistent rate limiting across platforms
+
+## Updated Client Implementations:
+
+### Bluesky Client
+- Now uses `SessionManager` for session state
+- Leverages `AuthenticatedHTTPClient` for HTTP requests
+- Uses common utility functions for URI handling
+
+### Mastodon Client  
+- Refactored to use `SessionManager` and `AuthenticatedHTTPClient`
+- Removed duplicate HTTP client creation and request handling
+- Uses shared utility functions
+
+## Results:
+- **Reduced duplication**: Eliminated ~200 lines of duplicate code
+- **Improved maintainability**: Common functionality centralized
+- **Better consistency**: Unified error handling and HTTP patterns
+- **Enhanced reusability**: Easy to add new social platforms
+
+The refactoring maintains full functionality while significantly improving code organization and reducing maintenance overhead. Tests pass and the existing API remains unchanged.

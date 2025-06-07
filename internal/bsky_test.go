@@ -181,7 +181,7 @@ func TestTruncateContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := truncateContent(tt.content, tt.maxLen)
+			result := TruncateContent(tt.content, tt.maxLen)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}

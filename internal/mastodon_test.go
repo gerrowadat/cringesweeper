@@ -580,7 +580,6 @@ func TestMastodonClient_PrunePosts(t *testing.T) {
 }
 
 func TestMastodonClient_TruncateContent(t *testing.T) {
-	client := NewMastodonClient()
 
 	tests := []struct {
 		name     string
@@ -610,7 +609,7 @@ func TestMastodonClient_TruncateContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := client.truncateContent(tt.content, tt.maxLen)
+			result := TruncateContent(tt.content, tt.maxLen)
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}

@@ -299,7 +299,7 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unlike post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("👍 Unliked post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), truncateContent(post.Content, 50))
+						fmt.Printf("👍 Unliked post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnlikedCount++
 					}
 				}
@@ -315,7 +315,7 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unrepost post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("🔄 Unshared repost from %s: %s\n", post.CreatedAt.Format("2006-01-02"), truncateContent(post.Content, 50))
+						fmt.Printf("🔄 Unshared repost from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnsharedCount++
 					}
 				}
@@ -337,7 +337,7 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to delete post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
-						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), truncateContent(post.Content, 50))
+						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.DeletedCount++
 					}
 				}
@@ -1188,17 +1188,4 @@ func (c *BlueskyClient) deleteRepostRecord(creds *Credentials, repostURI string)
 	}
 
 	return nil
-}
-
-// truncateContent truncates content for display in progress messages
-func truncateContent(content string, maxLen int) string {
-	// Replace newlines with spaces for display
-	content = strings.ReplaceAll(content, "\n", " ")
-	if len(content) <= maxLen {
-		return content
-	}
-	if maxLen <= 3 {
-		return "..."
-	}
-	return content[:maxLen-3] + "..."
 }
