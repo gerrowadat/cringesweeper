@@ -174,19 +174,43 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 		totalErrors += result.ErrorsCount
 		allErrors = append(allErrors, result.Errors...)
 
-		// Show round results
-		fmt.Printf("Round %d results:\n", round)
+		// Show round results with streaming for dry-run
 		if options.DryRun {
+			// Stream each post that would be processed
 			if len(result.PostsToDelete) > 0 {
-				fmt.Printf("  Would delete: %d posts\n", len(result.PostsToDelete))
+				fmt.Printf("Round %d - Posts to delete:\n", round)
+				for _, post := range result.PostsToDelete {
+					fmt.Printf("  🗑️  [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+				}
 			}
 			if len(result.PostsToUnlike) > 0 {
-				fmt.Printf("  Would unlike: %d posts\n", len(result.PostsToUnlike))
+				fmt.Printf("Round %d - Posts to unlike:\n", round)
+				for _, post := range result.PostsToUnlike {
+					fmt.Printf("  👎 [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+				}
 			}
 			if len(result.PostsToUnshare) > 0 {
-				fmt.Printf("  Would unshare: %d posts\n", len(result.PostsToUnshare))
+				fmt.Printf("Round %d - Posts to unshare:\n", round)
+				for _, post := range result.PostsToUnshare {
+					fmt.Printf("  🔄 [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+				}
+			}
+			if len(result.PostsPreserved) > 0 {
+				fmt.Printf("Round %d - Posts preserved:\n", round)
+				for _, post := range result.PostsPreserved {
+					reason := ""
+					if post.IsLikedByUser && post.Handle == post.Author {
+						reason = " (self-liked)"
+					}
+					if post.IsPinned {
+						reason = " (pinned)"
+					}
+					fmt.Printf("  🛡️  [%s] @%s - %s%s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60), reason)
+				}
 			}
 		} else {
+			// Non-dry-run: show summary only
+			fmt.Printf("Round %d results:\n", round)
 			if result.DeletedCount > 0 {
 				fmt.Printf("  Deleted: %d posts\n", result.DeletedCount)
 			}
@@ -196,10 +220,11 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 			if result.UnsharedCount > 0 {
 				fmt.Printf("  Unshared: %d posts\n", result.UnsharedCount)
 			}
+			if result.PreservedCount > 0 {
+				fmt.Printf("  Preserved: %d posts\n", result.PreservedCount)
+			}
 		}
-		if result.PreservedCount > 0 {
-			fmt.Printf("  Preserved: %d posts\n", result.PreservedCount)
-		}
+		
 		if result.ErrorsCount > 0 {
 			fmt.Printf("  Errors: %d\n", result.ErrorsCount)
 		}
@@ -311,37 +336,49 @@ func displayPruneResults(result *internal.PruneResult, platform string, dryRun b
 		return
 	}
 
-	// Show posts to be deleted
+	// Stream posts to be deleted
 	if len(result.PostsToDelete) > 0 {
 		fmt.Printf("Posts %s:\n", map[bool]string{true: "that would be deleted", false: "deleted"}[dryRun])
 		for i, post := range result.PostsToDelete {
-			fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			if dryRun {
+				fmt.Printf("  🗑️  [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			} else {
+				fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			}
 			if post.URL != "" {
-				fmt.Printf("   URL: %s\n", post.URL)
+				fmt.Printf("     URL: %s\n", post.URL)
 			}
 		}
 		fmt.Println()
 	}
 
-	// Show posts to be unliked
+	// Stream posts to be unliked
 	if len(result.PostsToUnlike) > 0 {
 		fmt.Printf("Posts %s:\n", map[bool]string{true: "that would be unliked", false: "unliked"}[dryRun])
 		for i, post := range result.PostsToUnlike {
-			fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			if dryRun {
+				fmt.Printf("  👎 [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			} else {
+				fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			}
 			if post.URL != "" {
-				fmt.Printf("   URL: %s\n", post.URL)
+				fmt.Printf("     URL: %s\n", post.URL)
 			}
 		}
 		fmt.Println()
 	}
 
-	// Show posts to be unshared
+	// Stream posts to be unshared
 	if len(result.PostsToUnshare) > 0 {
 		fmt.Printf("Posts %s:\n", map[bool]string{true: "that would be unshared", false: "unshared"}[dryRun])
 		for i, post := range result.PostsToUnshare {
-			fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			if dryRun {
+				fmt.Printf("  🔄 [%s] @%s - %s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			} else {
+				fmt.Printf("%d. [%s] @%s - %s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60))
+			}
 			if post.URL != "" {
-				fmt.Printf("   URL: %s\n", post.URL)
+				fmt.Printf("     URL: %s\n", post.URL)
 			}
 		}
 		fmt.Println()
@@ -358,7 +395,11 @@ func displayPruneResults(result *internal.PruneResult, platform string, dryRun b
 			if post.IsPinned {
 				reason = " (pinned)"
 			}
-			fmt.Printf("%d. [%s] @%s - %s%s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60), reason)
+			if dryRun {
+				fmt.Printf("  🛡️  [%s] @%s - %s%s\n", post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60), reason)
+			} else {
+				fmt.Printf("%d. [%s] @%s - %s%s\n", i+1, post.CreatedAt.Format("2006-01-02"), post.Handle, truncateContent(post.Content, 60), reason)
+			}
 		}
 		fmt.Println()
 	}
