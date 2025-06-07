@@ -148,7 +148,7 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 
 	fmt.Printf("Starting continuous pruning on %s (will continue until no more posts match criteria)...\n", platform)
 	if options.DryRun {
-		fmt.Println("DRY RUN MODE: No actual actions will be performed\n")
+		fmt.Println("DRY RUN MODE: No actual actions will be performed")
 	}
 
 	for {

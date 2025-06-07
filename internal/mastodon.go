@@ -804,15 +804,3 @@ func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials
 	return favoriteIDs, nil
 }
 
-// truncateContent truncates content for display in progress messages
-func (c *MastodonClient) truncateContent(content string, maxLen int) string {
-	// Replace newlines with spaces for display
-	content = strings.ReplaceAll(content, "\n", " ")
-	if len(content) <= maxLen {
-		return content
-	}
-	if maxLen <= 3 {
-		return "..."
-	}
-	return content[:maxLen-3] + "..."
-}
