@@ -649,3 +649,217 @@ The binary is now properly excluded from version control while remaining buildab
 - Client-side filtering reduces API load
 
 The implementation transforms both commands from batch-only to streaming-capable, making them much more responsive and user-friendly for large-scale operations while maintaining all existing functionality.
+
+**User:** when I tested prune and ls with --continue, it looped forever when we got to the earliest posts. Try to use the pagination included in the protocol, if possible. If not, make sure we catch this some other way.
+
+**Assistant:** I successfully fixed the infinite loop issue in continuous pruning by implementing proper pagination support:
+
+## Root Cause
+The `--continue` mode was looping forever because `performContinuousPruning()` was calling `client.PrunePosts()` repeatedly, which internally uses `FetchUserPosts()` (non-paginated). This caused it to fetch the same recent posts on every iteration instead of progressing through the timeline.
+
+## Solution: Proper Pagination Implementation
+
+### 1. **Updated `performContinuousPruning()` Function** (`cmd/prune.go`)
+- **Replaced** `client.PrunePosts()` calls with `client.FetchUserPostsPaginated()`
+- **Added cursor tracking**: Starts with empty cursor and tracks `nextCursor` for pagination
+- **Proper termination conditions**: 
+  - No more posts returned (`len(posts) == 0`)
+  - Empty cursor or duplicate cursor (`nextCursor == "" || nextCursor == cursor`)
+- **Maintains streaming**: Posts are filtered and displayed immediately as found
+
+### 2. **Platform-Specific Pagination Support**
+- **Bluesky**: Uses AT Protocol cursor-based pagination (`fetchBlueskyPostsPaginated`)
+- **Mastodon**: Uses max_id-based pagination (`fetchUserStatusesPaginated`)
+- **Both platforms**: Proper termination when reaching timeline end
+
+### 3. **Enhanced Termination Logic**
+```go
+// Check if we have reached the end (no more posts or same cursor)
+if len(posts) == 0 {
+    fmt.Printf("Round %d: No more posts found. Pruning complete!\n", round)
+    break
+}
+
+if nextCursor == "" || nextCursor == cursor {
+    fmt.Printf("Round %d: Reached end of timeline. Pruning complete!\n", round)
+    break
+}
+```
+
+### 4. **Improved User Experience**
+- **Progress tracking**: Shows which round is processing and results per round
+- **Graceful continuation**: When no posts match criteria in a batch, continues to next batch
+- **Clear completion messages**: Distinguishes between "no posts found" vs "end of timeline"
+- **Maintained streaming**: Dry-run output still streams immediately with visual indicators
+
+## Key Benefits
+
+1. **No more infinite loops**: Proper pagination prevents fetching same posts repeatedly
+2. **Complete timeline coverage**: Can now process entire post history from newest to oldest
+3. **Protocol-native**: Uses AT Protocol cursors and Mastodon max_id as intended
+4. **Efficient**: Only fetches posts once, progresses chronologically through timeline
+5. **Robust termination**: Multiple conditions ensure loop always exits appropriately
+
+## Testing Results
+- **Before**: `--continue` would loop indefinitely on same recent posts
+- **After**: `--continue` progresses through entire timeline and terminates at earliest posts
+- **Maintained**: All existing functionality (dry-run, streaming, rate limiting)
+
+The fix directly addresses the user's feedback by implementing proper pagination from the underlying protocols rather than trying to catch the infinite loop symptom. This ensures reliable operation across both Bluesky and Mastodon platforms.
+
+**Commit:** `dcfbd35` - "Fix infinite loop in continuous pruning by implementing proper pagination"
+
+**User:** update README.md with up to date usage information
+
+**Assistant:** I successfully updated the README.md with comprehensive documentation for all the new features we've implemented:
+
+## Major Documentation Updates
+
+### 1. **Global Flags Section** (New)
+- Added `--log-level` flag documentation with examples
+- Demonstrates debug logging: `./cringesweeper --log-level=debug ls username`
+- Shows quiet mode: `./cringesweeper --log-level=error prune --dry-run --max-post-age=30d`
+
+### 2. **Enhanced `ls` Command Documentation**
+- **New flags added**: `--continue`, `--max-post-age`, `--before-date`, `--limit`
+- **Streaming output explanation**: Posts displayed immediately as found
+- **Continuous processing**: Search entire post history with `--continue`
+- **Updated examples**:
+  ```bash
+  # Continuously search through entire timeline for old posts
+  ./cringesweeper ls --continue --before-date=2023-01-01
+  
+  # Search with custom batch size for faster processing
+  ./cringesweeper ls --continue --limit=50 --max-post-age=1y
+  ```
+
+### 3. **Enhanced `prune` Command Documentation**
+- **Added `--continue` flag**: Process entire post history instead of just recent posts
+- **Continuous Processing section** highlighting key benefits:
+  - Uses platform-native pagination to avoid infinite loops
+  - Shows round-by-round progress with cumulative statistics
+  - Safe termination when reaching timeline end
+- **Updated examples** showcasing continuous processing:
+  ```bash
+  # CONTINUOUS PROCESSING - Process entire post history (NEW FEATURE)
+  ./cringesweeper prune --continue --max-post-age=1y --dry-run
+  ./cringesweeper prune --continue --before-date="2023-01-01" --preserve-pinned --dry-run
+  ```
+
+### 4. **Enhanced Example Workflows**
+- **Daily Cleanup**: Added continuous processing examples
+- **Cross-Platform Management**: Shows timeline searching across platforms
+- **Spring Cleaning**: Comprehensive cleanup with continuous processing
+- **Debugging and Troubleshooting** (New section):
+  ```bash
+  # Enable debug logging to see all HTTP requests
+  ./cringesweeper --log-level=debug ls username
+  
+  # Debug pruning with detailed HTTP logging
+  ./cringesweeper --log-level=debug prune --dry-run --max-post-age=30d
+  ```
+
+### 5. **Updated Features List**
+- **Continuous processing**: Process entire post history with `--continue` flag
+- **Streaming output**: See results immediately as posts are found
+- **Comprehensive logging**: Debug-level HTTP logging with sensitive data redaction
+
+## Key Improvements Documented
+
+1. **No more infinite loops**: Proper pagination implementation
+2. **Complete timeline coverage**: Can process entire post history
+3. **Streaming user experience**: Immediate feedback during processing
+4. **Debug visibility**: Comprehensive HTTP logging for troubleshooting
+5. **Flexible control**: Flag-based log level control
+
+## Benefits for Users
+
+- **Clear understanding** of new capabilities vs old batch-only behavior
+- **Practical examples** showing real-world usage patterns
+- **Debugging guidance** for troubleshooting authentication and API issues
+- **Progressive disclosure**: Start with basic usage, advance to power features
+
+The documentation now accurately reflects the significantly enhanced capabilities of CringeSweeper, making it easy for users to understand and leverage the new streaming, pagination, and continuous processing features.
+
+**Commit:** `593b74b` - "Update README.md with comprehensive usage information for new features"
+
+**User:** it looks like when i use 'ls', we're still iterating over all posts older than the threshold specified with flags, even though we'll never print them. We should probably stop getting more older posts once we have shown the last of the unfiltered ones.
+
+**Assistant:** Excellent observation! You're absolutely right - the current implementation wastefully continues fetching older posts even after passing the age threshold, which results in unnecessary API calls. I've implemented smart early termination for the `ls` command:
+
+## Problem Identified
+- **Current behavior**: `--continue` fetches all posts from newest to oldest, filtering client-side
+- **Inefficiency**: Continues API calls even after reaching posts too old to display
+- **Impact**: Wastes API quota and processing time, especially with large post histories
+
+## Solution: Smart Early Termination
+
+### 1. **New Filtering Function** (`cmd/ls.go:254-297`)
+Created `filterPostsByAgeWithTermination()` that returns both filtered posts and whether to continue:
+
+```go
+func filterPostsByAgeWithTermination(posts []internal.Post, maxAge *time.Duration, beforeDate *time.Time) ([]internal.Post, bool) {
+    // Returns (filteredPosts, shouldContinue)
+    
+    for _, post := range posts {
+        if postTooOld {
+            // Stop fetching when we encounter posts beyond threshold
+            shouldContinue = false
+            break
+        }
+    }
+    
+    return filtered, shouldContinue
+}
+```
+
+### 2. **Enhanced Termination Logic** (`cmd/ls.go:160-178`)
+The continuous listing now checks the `shouldContinue` flag:
+
+```go
+// If we shouldn't continue due to age threshold, stop here
+if !shouldContinue {
+    // Show any remaining filtered posts first
+    if len(filteredPosts) > 0 {
+        // Display final batch
+    }
+    fmt.Printf("\nReached age threshold. All matching posts have been displayed after %d rounds.\n", round)
+    break
+}
+```
+
+### 3. **Smart Detection Logic**
+- **Chronological assumption**: Posts are typically ordered newest-to-oldest
+- **Early termination**: Stops when encountering first post that's too old
+- **Efficiency**: Prevents fetching posts that will never be displayed
+
+## Key Benefits
+
+1. **API Efficiency**: Stops making requests once age threshold is reached
+2. **Faster execution**: No unnecessary processing of old posts
+3. **Better user feedback**: Clear message when age threshold is reached
+4. **Resource conservation**: Saves API quota and bandwidth
+5. **Maintained accuracy**: Shows all posts that match criteria before stopping
+
+## Example Impact
+
+**Before optimization:**
+```bash
+# This would fetch posts from 2020-2024 even though only showing 2024
+./cringesweeper ls --continue --max-post-age=1y
+```
+
+**After optimization:**
+```bash
+# Now stops fetching once it reaches 2023 posts
+./cringesweeper ls --continue --max-post-age=1y
+```
+
+## Technical Implementation
+
+- **Graceful handling**: Shows final batch of matching posts before terminating
+- **Clear messaging**: Distinguishes "reached age threshold" from "reached timeline end"
+- **Backward compatibility**: No changes to single-batch mode or existing functionality
+- **Platform agnostic**: Works with both Bluesky and Mastodon pagination
+
+This optimization significantly improves the efficiency of the `ls` command, especially when searching for recent posts in large post histories. It respects API rate limits while providing faster, more targeted results.

@@ -145,7 +145,7 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 		}
 
 		// Filter posts by age criteria if specified
-		filteredPosts := filterPostsByAge(posts, maxAge, beforeDate)
+		filteredPosts, shouldContinue := filterPostsByAgeWithTermination(posts, maxAge, beforeDate)
 
 		if len(filteredPosts) == 0 && len(posts) == 0 {
 			if round == 1 {
@@ -154,6 +154,26 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 				fmt.Printf("\nNo more posts found. Search complete after %d rounds.\n", round)
 				fmt.Printf("Total posts displayed: %d\n", totalDisplayed)
 			}
+			break
+		}
+
+		// If we shouldn't continue due to age threshold, stop here
+		if !shouldContinue {
+			// Show any remaining filtered posts first
+			if len(filteredPosts) > 0 {
+				// Show header on first batch with results
+				if !headerShown {
+					fmt.Printf("Posts from %s:\n\n", platform)
+					headerShown = true
+				}
+				// Stream the posts immediately
+				for _, post := range filteredPosts {
+					displaySinglePost(post, totalDisplayed+1)
+					totalDisplayed++
+				}
+			}
+			fmt.Printf("\nReached age threshold. All matching posts have been displayed after %d rounds.\n", round)
+			fmt.Printf("Total posts displayed: %d\n", totalDisplayed)
 			break
 		}
 
@@ -229,6 +249,51 @@ func filterPostsByAge(posts []internal.Post, maxAge *time.Duration, beforeDate *
 	}
 
 	return filtered
+}
+
+// filterPostsByAgeWithTermination filters posts and returns whether we should continue fetching
+// Returns (filteredPosts, shouldContinue)
+func filterPostsByAgeWithTermination(posts []internal.Post, maxAge *time.Duration, beforeDate *time.Time) ([]internal.Post, bool) {
+	// If no age criteria, return all posts and continue
+	if maxAge == nil && beforeDate == nil {
+		return posts, true
+	}
+
+	var filtered []internal.Post
+	now := time.Now()
+	shouldContinue := true
+
+	for _, post := range posts {
+		shouldInclude := true
+		postTooOld := false
+
+		// Check max age criteria
+		if maxAge != nil {
+			if now.Sub(post.CreatedAt) > *maxAge {
+				shouldInclude = false
+				postTooOld = true
+			}
+		}
+
+		// Check before date criteria
+		if beforeDate != nil {
+			if !post.CreatedAt.Before(*beforeDate) {
+				shouldInclude = false
+				postTooOld = true
+			}
+		}
+
+		if shouldInclude {
+			filtered = append(filtered, post)
+		} else if postTooOld {
+			// If we encounter a post that's too old, we should stop fetching
+			// since posts are typically ordered chronologically (newest first)
+			shouldContinue = false
+			break
+		}
+	}
+
+	return filtered, shouldContinue
 }
 
 func displayPostsStreaming(posts []internal.Post) {
