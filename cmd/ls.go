@@ -129,6 +129,7 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 	round := 1
 	totalDisplayed := 0
 	headerShown := false
+	cursor := "" // Start with empty cursor
 
 	fmt.Printf("Searching %s for posts", platform)
 	if maxAge != nil || beforeDate != nil {
@@ -137,7 +138,7 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 	fmt.Printf(" (will continue until no more posts found)...\n\n")
 
 	for {
-		posts, err := client.FetchUserPosts(username, batchLimit)
+		posts, nextCursor, err := client.FetchUserPostsPaginated(username, batchLimit, cursor)
 		if err != nil {
 			fmt.Printf("Error in round %d: %v\n", round, err)
 			break
@@ -146,14 +147,28 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 		// Filter posts by age criteria if specified
 		filteredPosts := filterPostsByAge(posts, maxAge, beforeDate)
 
-		if len(filteredPosts) == 0 {
+		if len(filteredPosts) == 0 && len(posts) == 0 {
 			if round == 1 {
-				fmt.Println("No posts match the specified criteria")
+				fmt.Println("No posts found")
 			} else {
 				fmt.Printf("\nNo more posts found. Search complete after %d rounds.\n", round)
 				fmt.Printf("Total posts displayed: %d\n", totalDisplayed)
 			}
 			break
+		}
+
+		// If we got posts but none match filters, continue to next page
+		if len(filteredPosts) == 0 && len(posts) > 0 {
+			// Check if we have a next cursor to continue
+			if nextCursor == "" || nextCursor == cursor {
+				fmt.Printf("\nReached end of timeline. No more posts match criteria after %d rounds.\n", round)
+				fmt.Printf("Total posts displayed: %d\n", totalDisplayed)
+				break
+			}
+			cursor = nextCursor
+			round++
+			time.Sleep(time.Second)
+			continue
 		}
 
 		// Show header on first batch with results
@@ -168,6 +183,14 @@ func performContinuousListing(client internal.SocialClient, username string, bat
 			totalDisplayed++
 		}
 
+		// Check if we have a next cursor to continue
+		if nextCursor == "" || nextCursor == cursor {
+			fmt.Printf("\nReached end of timeline. Search complete after %d rounds.\n", round)
+			fmt.Printf("Total posts displayed: %d\n", totalDisplayed)
+			break
+		}
+
+		cursor = nextCursor
 		round++
 
 		// Small delay between rounds to be respectful to APIs

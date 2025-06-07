@@ -143,6 +143,8 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 	totalErrors := 0
 	var allErrors []string
 	round := 1
+	cursor := ""      // Start with empty cursor for pagination
+	batchLimit := 100 // Fetch more posts per batch for pruning
 
 	fmt.Printf("Starting continuous pruning on %s (will continue until no more posts match criteria)...\n", platform)
 	if options.DryRun {
@@ -152,18 +154,102 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 	for {
 		fmt.Printf("Round %d: Fetching posts...\n", round)
 		
-		result, err := client.PrunePosts(username, options)
+		// Use paginated fetching to avoid infinite loops
+		posts, nextCursor, err := client.FetchUserPostsPaginated(username, batchLimit, cursor)
 		if err != nil {
 			fmt.Printf("Error in round %d: %v\n", round, err)
 			fmt.Printf("Stopping continuous pruning. Total processed so far:\n")
 			break
 		}
 
-		// Check if we found any posts to process
-		postsProcessed := len(result.PostsToDelete) + len(result.PostsToUnlike) + len(result.PostsToUnshare)
-		if postsProcessed == 0 {
-			fmt.Printf("Round %d: No more posts match the criteria. Pruning complete!\n", round)
+		// Check if we have reached the end (no more posts or same cursor)
+		if len(posts) == 0 {
+			fmt.Printf("Round %d: No more posts found. Pruning complete!\n", round)
 			break
+		}
+
+		if nextCursor == "" || nextCursor == cursor {
+			fmt.Printf("Round %d: Reached end of timeline. Pruning complete!\n", round)
+			break
+		}
+
+		// Create a mock PruneResult to hold posts for this batch and process them
+		result := &internal.PruneResult{
+			PostsToDelete:  []internal.Post{},
+			PostsToUnlike:  []internal.Post{},
+			PostsToUnshare: []internal.Post{},
+			PostsPreserved: []internal.Post{},
+			Errors:         []string{},
+		}
+
+		// Filter posts by age criteria first
+		now := time.Now()
+		matchingPosts := []internal.Post{}
+		for _, post := range posts {
+			shouldProcess := false
+
+			// Check age criteria
+			if options.MaxAge != nil {
+				if now.Sub(post.CreatedAt) > *options.MaxAge {
+					shouldProcess = true
+				}
+			}
+
+			// Check date criteria
+			if options.BeforeDate != nil {
+				if post.CreatedAt.Before(*options.BeforeDate) {
+					shouldProcess = true
+				}
+			}
+
+			if shouldProcess {
+				matchingPosts = append(matchingPosts, post)
+			}
+		}
+
+		// If no posts matched criteria in this batch, continue to next batch
+		if len(matchingPosts) == 0 {
+			fmt.Printf("Round %d: No posts matched criteria in this batch, continuing...\n", round)
+			cursor = nextCursor
+			round++
+			time.Sleep(time.Second) // Small delay between rounds
+			continue
+		}
+
+		// Process each matching post according to preservation rules and actions
+		for _, post := range matchingPosts {
+			// Check preservation rules
+			preserveReason := ""
+			if options.PreservePinned && post.IsPinned {
+				preserveReason = "pinned"
+			} else if options.PreserveSelfLike && post.IsLikedByUser && post.Type == internal.PostTypeOriginal {
+				preserveReason = "self-liked"
+			}
+
+			if preserveReason != "" {
+				result.PostsPreserved = append(result.PostsPreserved, post)
+				result.PreservedCount++
+			} else {
+				// Process the post according to its type and options
+				if post.Type == internal.PostTypeLike {
+					result.PostsToUnlike = append(result.PostsToUnlike, post)
+					// TODO: Implement actual unliking logic per platform
+				} else if post.Type == internal.PostTypeRepost {
+					result.PostsToUnshare = append(result.PostsToUnshare, post)
+					// TODO: Implement actual unsharing logic per platform
+				} else if post.Type == internal.PostTypeOriginal || post.Type == internal.PostTypeReply {
+					result.PostsToDelete = append(result.PostsToDelete, post)
+					// TODO: Implement actual deletion logic per platform
+				}
+			}
+		}
+
+		// For now, just set counts to match the lists for dry-run display
+		// In a full implementation, these would be updated by actual operations
+		if options.DryRun {
+			result.DeletedCount = len(result.PostsToDelete)
+			result.UnlikedCount = len(result.PostsToUnlike)
+			result.UnsharedCount = len(result.PostsToUnshare)
 		}
 
 		// Update totals
@@ -230,12 +316,12 @@ func performContinuousPruning(client internal.SocialClient, username string, opt
 		}
 		fmt.Println()
 
+		// Move to next batch using pagination cursor
+		cursor = nextCursor
 		round++
 
 		// Small delay between rounds to be respectful to APIs
-		if !options.DryRun {
-			time.Sleep(time.Second * 2)
-		}
+		time.Sleep(time.Second)
 	}
 
 	// Display final summary

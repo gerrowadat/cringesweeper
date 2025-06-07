@@ -124,6 +124,203 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 	return posts, nil
 }
 
+// FetchUserPostsPaginated retrieves posts with pagination support using max_id
+func (c *MastodonClient) FetchUserPostsPaginated(username string, limit int, cursor string) ([]Post, string, error) {
+	instanceURL, acct, err := c.parseUsername(username)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid username format: %w", err)
+	}
+
+	// First, get the account ID
+	accountID, err := c.getAccountID(instanceURL, acct)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	// Check if we have authentication for enhanced data
+	var statuses []mastodonStatus
+	var nextCursor string
+	creds, authErr := GetCredentialsForPlatform("mastodon")
+	if authErr == nil && ValidateCredentials(creds) == nil {
+		// Use authenticated fetch for viewer interaction data
+		statuses, nextCursor, err = c.fetchUserStatusesPaginated(instanceURL, accountID, limit, cursor, creds)
+	} else {
+		// Use public fetch without viewer data
+		statuses, nextCursor, err = c.fetchUserStatusesPaginatedPublic(instanceURL, accountID, limit, cursor)
+	}
+
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch statuses: %w", err)
+	}
+
+	// Convert to generic Post format (same logic as FetchUserPosts)
+	var posts []Post
+	for _, status := range statuses {
+		post := Post{
+			ID:        status.ID,
+			Author:    status.Account.DisplayName,
+			Handle:    status.Account.Acct,
+			Content:   c.stripHTML(status.Content),
+			CreatedAt: status.CreatedAt,
+			URL:       status.URL,
+			Type:      c.determinePostType(status),
+			Platform:  "mastodon",
+
+			// Engagement metrics
+			RepostCount: status.ReblogsCount,
+			LikeCount:   status.FavouritesCount,
+			ReplyCount:  status.RepliesCount,
+
+			// Viewer interaction status
+			IsLikedByUser: status.Favourited != nil && *status.Favourited,
+			IsPinned:      status.Pinned != nil && *status.Pinned,
+		}
+
+		// Handle reblogs/reposts
+		if status.Reblog != nil {
+			post.Type = PostTypeRepost
+			// IMPORTANT: For reblogs, post.ID should be the reblog status ID (for unrebogging)
+			// status.ID is the reblog action ID, status.Reblog.ID is the original post ID
+			post.ID = status.ID // This is the reblog action ID we need to unreblog
+			post.OriginalAuthor = status.Reblog.Account.DisplayName
+			post.OriginalHandle = status.Reblog.Account.Acct
+			post.Content = c.stripHTML(status.Reblog.Content)
+			// Create embedded original post
+			post.OriginalPost = &Post{
+				ID:        status.Reblog.ID, // Original post ID
+				Author:    status.Reblog.Account.DisplayName,
+				Handle:    status.Reblog.Account.Acct,
+				Content:   c.stripHTML(status.Reblog.Content),
+				CreatedAt: status.Reblog.CreatedAt,
+				URL:       status.Reblog.URL,
+				Type:      PostTypeOriginal,
+				Platform:  "mastodon",
+			}
+		}
+
+		// Handle replies
+		if status.InReplyToID != nil {
+			post.Type = PostTypeReply
+			post.InReplyToID = *status.InReplyToID
+			if status.InReplyToAccountID != nil {
+				// We'd need additional API call to get the account info
+				// For now, just store the ID
+			}
+		}
+
+		posts = append(posts, post)
+	}
+
+	return posts, nextCursor, nil
+}
+
+func (c *MastodonClient) fetchUserStatusesPaginatedPublic(instanceURL, accountID string, limit int, maxID string) ([]mastodonStatus, string, error) {
+	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
+
+	params := url.Values{}
+	params.Add("limit", strconv.Itoa(limit))
+	params.Add("exclude_replies", "true")
+	// Include reblogs so we can manage the user's own reblog actions
+	params.Add("exclude_reblogs", "false")
+	
+	if maxID != "" {
+		params.Add("max_id", maxID)
+	}
+
+	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
+
+	LogHTTPRequest("GET", fullURL)
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch statuses: %w", err)
+	}
+	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", fmt.Errorf("statuses request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read statuses response: %w", err)
+	}
+
+	var statuses []mastodonStatus
+	if err := json.Unmarshal(body, &statuses); err != nil {
+		return nil, "", fmt.Errorf("failed to parse statuses response: %w", err)
+	}
+
+	// Determine next cursor from Link header or last status ID
+	nextCursor := ""
+	if len(statuses) > 0 {
+		// Use the ID of the last status as the max_id for the next request
+		nextCursor = statuses[len(statuses)-1].ID
+	}
+
+	return statuses, nextCursor, nil
+}
+
+func (c *MastodonClient) fetchUserStatusesPaginated(instanceURL, accountID string, limit int, maxID string, creds *Credentials) ([]mastodonStatus, string, error) {
+	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
+
+	params := url.Values{}
+	params.Add("limit", strconv.Itoa(limit))
+	params.Add("exclude_replies", "true")
+	// Include reblogs so we can manage the user's own reblog actions
+	params.Add("exclude_reblogs", "false")
+	
+	if maxID != "" {
+		params.Add("max_id", maxID)
+	}
+
+	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
+
+	req, err := http.NewRequest("GET", fullURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication header
+	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
+
+	LogHTTPRequest("GET", fullURL)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch statuses: %w", err)
+	}
+	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", fmt.Errorf("statuses request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read statuses response: %w", err)
+	}
+
+	var statuses []mastodonStatus
+	if err := json.Unmarshal(body, &statuses); err != nil {
+		return nil, "", fmt.Errorf("failed to parse statuses response: %w", err)
+	}
+
+	// Determine next cursor from last status ID
+	nextCursor := ""
+	if len(statuses) > 0 {
+		// Use the ID of the last status as the max_id for the next request
+		nextCursor = statuses[len(statuses)-1].ID
+	}
+
+	return statuses, nextCursor, nil
+}
+
 // parseUsername extracts instance URL and account from username
 // Supports formats: user@instance.social or just user (assumes MASTODON_INSTANCE env var)
 func (c *MastodonClient) parseUsername(username string) (instanceURL, acct string, err error) {

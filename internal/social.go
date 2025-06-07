@@ -87,6 +87,9 @@ type SocialClient interface {
 	// FetchUserPosts retrieves recent posts for a given username
 	FetchUserPosts(username string, limit int) ([]Post, error)
 
+	// FetchUserPostsPaginated retrieves posts with pagination support
+	FetchUserPostsPaginated(username string, limit int, cursor string) ([]Post, string, error)
+
 	// GetPlatformName returns the name of the social platform
 	GetPlatformName() string
 

@@ -94,6 +94,118 @@ func (c *BlueskyClient) FetchUserPosts(username string, limit int) ([]Post, erro
 	return genericPosts, nil
 }
 
+// FetchUserPostsPaginated retrieves posts with cursor-based pagination
+func (c *BlueskyClient) FetchUserPostsPaginated(username string, limit int, cursor string) ([]Post, string, error) {
+	posts, nextCursor, err := c.fetchBlueskyPostsPaginated(username, limit, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Convert Bluesky posts to generic Post format
+	var genericPosts []Post
+	for _, bskyPost := range posts {
+		post := Post{
+			ID:        bskyPost.URI,
+			Author:    bskyPost.Author.DisplayName,
+			Handle:    bskyPost.Author.Handle,
+			Content:   bskyPost.Record.Text,
+			CreatedAt: bskyPost.Record.CreatedAt,
+			URL:       fmt.Sprintf("https://bsky.app/profile/%s/post/%s", bskyPost.Author.Handle, extractPostID(bskyPost.URI)),
+			Type:      c.determinePostType(bskyPost),
+			Platform:  "bluesky",
+
+			// Engagement metrics
+			RepostCount: bskyPost.RepostCount,
+			LikeCount:   bskyPost.LikeCount,
+			ReplyCount:  bskyPost.ReplyCount,
+		}
+
+		// Use Author.Handle as fallback if DisplayName is empty
+		if post.Author == "" {
+			post.Author = bskyPost.Author.Handle
+		}
+
+		// Set viewer interaction status
+		if bskyPost.ViewerData != nil {
+			post.IsLikedByUser = bskyPost.ViewerData.Like != nil
+			// Note: IsPinned would need to be determined from the feed metadata
+		}
+
+		// Handle reposts - these are the user's own repost records, not the original posts
+		if bskyPost.Record.Type == "app.bsky.feed.repost" {
+			post.Type = PostTypeRepost
+			// For reposts, the ID should be the repost record URI, not the original post URI
+			post.ID = bskyPost.URI // This is the user's repost record URI
+		}
+
+		// Handle replies
+		if bskyPost.Record.Reply != nil {
+			post.Type = PostTypeReply
+			post.InReplyToID = bskyPost.Record.Reply.Parent.URI
+		}
+
+		// Note: Likes are not returned by getAuthorFeed - they need to be fetched separately
+		// if we want to include them in the pruning process
+
+		genericPosts = append(genericPosts, post)
+	}
+
+	return genericPosts, nextCursor, nil
+}
+
+func (c *BlueskyClient) fetchBlueskyPostsPaginated(username string, limit int, cursor string) ([]blueskyPost, string, error) {
+	baseURL := "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed"
+	params := url.Values{}
+	params.Add("actor", username)
+	params.Add("limit", fmt.Sprintf("%d", limit))
+	params.Add("include_pins", "true")         // Include pinned posts
+	params.Add("filter", "posts_with_replies") // Get user's own posts and replies
+	
+	if cursor != "" {
+		params.Add("cursor", cursor)
+	}
+
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+
+	LogHTTPRequest("GET", fullURL)
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch posts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var feedResponse blueskyEnhancedFeedResponse
+	if err := json.Unmarshal(body, &feedResponse); err != nil {
+		return nil, "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	var posts []blueskyPost
+	for _, item := range feedResponse.Feed {
+		// Enhance post with viewer information
+		item.Post.ViewerData = item.ViewerData
+		posts = append(posts, item.Post)
+	}
+
+	nextCursor := ""
+	if feedResponse.Cursor != nil {
+		nextCursor = *feedResponse.Cursor
+	}
+
+	return posts, nextCursor, nil
+}
+
 // Bluesky-specific types
 type blueskyPost struct {
 	URI        string             `json:"uri"`
