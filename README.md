@@ -5,12 +5,15 @@ A command-line tool for managing your social media presence across multiple plat
 ## Features
 
 - **Multi-platform support**: Works with Bluesky and Mastodon (more platforms coming soon)
-- **Post viewing**: List and browse your recent posts across platforms
+- **Post viewing**: List and browse your recent posts across platforms with streaming output
 - **Intelligent pruning**: Delete, unlike, or unshare posts based on age, date, and smart criteria
+- **Continuous processing**: Process entire post history with `--continue` flag using proper pagination
+- **Streaming output**: See results immediately as posts are found and processed
 - **Safety first**: Dry-run mode shows what would be deleted before actually deleting
 - **Preserve important posts**: Keep pinned posts and self-liked content
 - **Cross-platform authentication**: Guided setup for API keys and tokens
 - **Post type detection**: Distinguishes between original posts, reposts, replies, and quotes
+- **Comprehensive logging**: Debug-level HTTP logging with sensitive data redaction
 
 ## Installation
 
@@ -49,11 +52,27 @@ go build
    ./cringesweeper auth --status
    ```
 
+## Global Flags
+
+All commands support these global flags:
+
+- `--log-level string`: Set the logging level (debug, info, warn, error) (default "info")
+- `-h, --help`: Help for any command
+
+**Logging Examples:**
+```bash
+# Enable debug logging to see all HTTP requests and responses
+./cringesweeper --log-level=debug ls username
+
+# Quiet mode - only show errors
+./cringesweeper --log-level=error prune --dry-run --max-post-age=30d
+```
+
 ## Commands
 
 ### `ls` - List Recent Posts
 
-Display recent posts from a user's timeline.
+Display recent posts from a user's timeline with optional filtering and continuous searching.
 
 ```bash
 ./cringesweeper ls [username] [flags]
@@ -61,11 +80,15 @@ Display recent posts from a user's timeline.
 
 **Flags:**
 - `-p, --platform string`: Social media platform (bluesky, mastodon) (default "bluesky")
+- `--limit string`: Maximum number of posts to fetch per batch (default "10")
+- `--max-post-age string`: Only show posts older than this (e.g., 30d, 1y, 24h)
+- `--before-date string`: Only show posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
+- `--continue`: Continue searching and fetching posts until no more are found
 - `-h, --help`: Help for ls command
 
 **Examples:**
 ```bash
-# List posts using saved credentials (after running auth command)
+# List recent posts using saved credentials (after running auth command)
 ./cringesweeper ls
 
 # List posts from a specific Bluesky user
@@ -74,10 +97,24 @@ Display recent posts from a user's timeline.
 # List posts from a Mastodon user
 ./cringesweeper ls --platform=mastodon user@mastodon.social
 
+# Show posts older than 30 days with streaming output
+./cringesweeper ls --max-post-age=30d
+
+# Continuously search through entire timeline for old posts
+./cringesweeper ls --continue --before-date=2023-01-01
+
+# Search with custom batch size for faster processing
+./cringesweeper ls --continue --limit=50 --max-post-age=1y
+
 # Use environment variable for username (fallback method)
 export BLUESKY_USER=user.bsky.social
 ./cringesweeper ls
 ```
+
+**Streaming Output:**
+- Posts are displayed immediately as they are found and filtered
+- Use `--continue` to search through your entire post history
+- Perfect for finding old posts or getting an overview of your posting patterns
 
 **Username Resolution:**
 CringeSweeper automatically finds your username using this priority order:
@@ -96,7 +133,7 @@ CringeSweeper automatically finds your username using this priority order:
 Delete, unlike, or unshare posts from your timeline based on age, date, and preservation rules.
 
 Alternative actions include unliking posts or unsharing reposts instead of deleting them,
-providing gentler cleanup options.
+providing gentler cleanup options. Supports continuous processing to handle entire post histories.
 
 ```bash
 ./cringesweeper prune [username] [flags]
@@ -110,6 +147,7 @@ providing gentler cleanup options.
 - `--preserve-pinned`: Don't delete pinned posts
 - `--unlike-posts`: Unlike posts instead of deleting them
 - `--unshare-reposts`: Unshare/unrepost instead of deleting reposts
+- `--continue`: Continue searching and processing posts until no more match the criteria
 - `--rate-limit-delay string`: Delay between API requests to respect rate limits (default: 60s for Mastodon, 1s for Bluesky)
 - `--dry-run`: Show what would be deleted without actually deleting
 - `-h, --help`: Help for prune command
@@ -148,6 +186,10 @@ providing gentler cleanup options.
 # Delete posts before a specific date for specific user
 ./cringesweeper prune --before-date="2023-01-01" --dry-run user.bsky.social
 
+# CONTINUOUS PROCESSING - Process entire post history (NEW FEATURE)
+./cringesweeper prune --continue --max-post-age=1y --dry-run
+./cringesweeper prune --continue --before-date="2023-01-01" --preserve-pinned --dry-run
+
 # Mastodon pruning with multiple criteria
 ./cringesweeper prune --platform=mastodon --max-post-age=6m --preserve-selflike
 
@@ -160,6 +202,14 @@ providing gentler cleanup options.
 # Custom rate limiting to override platform defaults
 ./cringesweeper prune --platform=bluesky --max-post-age=30d --rate-limit-delay=500ms --dry-run
 ```
+
+**Continuous Processing (`--continue` flag):**
+- **Default behavior**: Processes recent posts only (typically ~100 most recent)
+- **With `--continue`**: Searches through your entire post history until no more posts match criteria
+- **Streaming output**: Shows posts immediately as they're found and processed
+- **Proper pagination**: Uses platform-native pagination to avoid infinite loops
+- **Progress tracking**: Shows round-by-round progress with cumulative statistics
+- **Safe termination**: Automatically stops when reaching the end of your timeline
 
 **Rate Limiting:**
 - **Mastodon**: Default 60 seconds between requests (30 DELETE requests per 30 minutes limit)
@@ -283,6 +333,9 @@ The auth command can automatically save credentials to config files for persiste
 # Gentle cleanup: unlike old posts, unshare old reposts
 ./cringesweeper prune --max-post-age=365d --unlike-posts --unshare-reposts --preserve-pinned
 
+# Process entire post history for comprehensive cleanup
+./cringesweeper prune --continue --max-post-age=365d --preserve-pinned --preserve-selflike --dry-run
+
 # If you want permanent deletion, run the actual deletion
 ./cringesweeper prune --max-post-age=365d --preserve-pinned --preserve-selflike
 ```
@@ -293,9 +346,17 @@ The auth command can automatically save credentials to config files for persiste
 ./cringesweeper ls --platform=bluesky
 ./cringesweeper ls --platform=mastodon
 
+# Search through entire timeline on both platforms
+./cringesweeper ls --continue --platform=bluesky --max-post-age=1y
+./cringesweeper ls --continue --platform=mastodon --before-date=2024-01-01
+
 # Prune old posts from both platforms
 ./cringesweeper prune --platform=bluesky --max-post-age=6m --dry-run
 ./cringesweeper prune --platform=mastodon --max-post-age=6m --dry-run
+
+# Comprehensive cleanup across platforms
+./cringesweeper prune --continue --platform=bluesky --max-post-age=6m --dry-run
+./cringesweeper prune --continue --platform=mastodon --max-post-age=6m --dry-run
 ```
 
 ### Spring Cleaning
@@ -303,11 +364,32 @@ The auth command can automatically save credentials to config files for persiste
 # Preview gentle cleanup before 2024 (unlike + unshare instead of delete)
 ./cringesweeper prune --before-date="2024-01-01" --unlike-posts --unshare-reposts --preserve-pinned --dry-run
 
+# Comprehensive spring cleaning with continuous processing
+./cringesweeper prune --continue --before-date="2024-01-01" --preserve-pinned --preserve-selflike --dry-run
+
 # Delete everything before 2024, but keep important posts
 ./cringesweeper prune --before-date="2024-01-01" --preserve-pinned --preserve-selflike --dry-run
 
 # Unshare old reposts only (gentler than deletion)
 ./cringesweeper prune --max-post-age=90d --unshare-reposts --dry-run
+
+# Process entire timeline for thorough cleanup
+./cringesweeper prune --continue --max-post-age=90d --unshare-reposts --dry-run
+```
+
+### Debugging and Troubleshooting
+```bash
+# Enable debug logging to see all HTTP requests
+./cringesweeper --log-level=debug ls username
+
+# Debug authentication issues
+./cringesweeper --log-level=debug auth --status
+
+# Debug pruning with detailed HTTP logging
+./cringesweeper --log-level=debug prune --dry-run --max-post-age=30d
+
+# Quiet mode for scripts
+./cringesweeper --log-level=error prune --max-post-age=30d
 ```
 
 ## Contributing
