@@ -105,6 +105,12 @@ To add support for a new social platform:
   - `--continue`: Process entire timeline instead of just recent posts
   - `--dry-run`: Preview actions without performing them
   - All age filtering options from `ls` command
+- **`server`**: Long-term service mode with periodic pruning and metrics
+  - `--port`: HTTP server port (default: 8080)
+  - `--prune-interval`: Time between prune runs (default: 1h)
+  - All prune flags supported for periodic operations
+  - Credentials ONLY from environment variables (no config files)
+  - Serves Prometheus metrics at `/metrics` endpoint
 
 All commands support:
 - `--platform` flag to specify target social network
@@ -118,6 +124,49 @@ The test suite includes:
 - Post type and pruning logic validation
 
 Tests use table-driven patterns and may require environment setup for some credential-related tests.
+
+## Containerization and Deployment
+
+### Docker Support
+
+CringeSweeper includes full Docker support for containerized deployments:
+
+- **`Dockerfile`**: Multi-stage build with Alpine Linux for minimal image size
+- **`docker-compose.yml`**: Complete deployment stack with optional monitoring
+- **`.dockerignore`**: Optimized build context
+- **`.env.example`**: Template for environment configuration
+
+### Server Mode for Containers
+
+The `server` command is specifically designed for long-term containerized deployment:
+
+- **Environment-only credentials**: No config files, only environment variables
+- **Health checks**: Built-in HTTP health endpoint at `/`
+- **Prometheus metrics**: Comprehensive metrics at `/metrics`
+- **Graceful shutdown**: Proper signal handling for container orchestration
+- **Non-root execution**: Runs as unprivileged user for security
+- **Resource efficient**: Minimal memory footprint suitable for constrained environments
+
+### Quick Start with Docker
+
+```bash
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your credentials
+
+# Start with monitoring stack
+docker-compose --profile monitoring up -d
+
+# Or just the server
+docker-compose up -d cringesweeper
+```
+
+### Monitoring Integration
+
+Optional monitoring stack includes:
+- **Prometheus**: Metrics collection on port 9090
+- **Grafana**: Visualization dashboard on port 3000
+- **Health checks**: Built-in container health monitoring
 
 ## Development Guidelines
 

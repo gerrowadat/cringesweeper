@@ -14,6 +14,7 @@ A command-line tool for managing your social media presence across multiple plat
 - **Cross-platform authentication**: Guided setup for API keys and tokens
 - **Post type detection**: Distinguishes between original posts, reposts, replies, and quotes
 - **Comprehensive logging**: Debug-level HTTP logging with sensitive data redaction
+- **Server mode**: Long-term containerized deployment with Prometheus metrics
 
 ## Installation
 
@@ -248,6 +249,63 @@ Guide you through setting up authentication credentials for social media platfor
 # Check credential status for all platforms (--platform flag is ignored with --status)
 ./cringesweeper auth --status
 ```
+
+### `server` - Long-term Service Mode
+
+Run CringeSweeper as a persistent service with periodic pruning and Prometheus metrics. Designed for containerized deployments.
+
+```bash
+./cringesweeper server [username] [flags]
+```
+
+**Server-specific Flags:**
+- `-P, --port int`: HTTP server port (default 8080)
+- `--prune-interval string`: Time between prune runs (e.g., 30m, 1h, 2h) (default "1h")
+- All `prune` command flags are supported for periodic operations
+
+**Important:** In server mode, credentials are ONLY read from environment variables (no config files).
+
+**Server Endpoints:**
+- `GET /`: Health check with service information
+- `GET /metrics`: Prometheus metrics endpoint
+
+**Key Metrics Exported:**
+- `cringesweeper_prune_runs_total`: Total number of prune runs
+- `cringesweeper_posts_processed_total`: Posts processed by action type
+- `cringesweeper_prune_run_duration_seconds`: Duration of prune operations
+- `cringesweeper_last_prune_timestamp`: Timestamp of last prune run
+
+**Examples:**
+```bash
+# Run server with 30-day post retention
+BLUESKY_USERNAME=user.bsky.social BLUESKY_APP_PASSWORD=secret \
+./cringesweeper server --platform=bluesky --max-post-age=30d --preserve-pinned --prune-interval=1h
+
+# Run with Mastodon, delete posts before specific date
+MASTODON_USERNAME=user MASTODON_ACCESS_TOKEN=token MASTODON_INSTANCE=https://mastodon.social \
+./cringesweeper server --platform=mastodon --before-date=2024-01-01 --prune-interval=2h
+
+# Test mode - show what would be deleted without actually deleting
+./cringesweeper server --platform=bluesky --max-post-age=7d --dry-run --prune-interval=30m
+```
+
+**Docker Deployment:**
+```bash
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your credentials
+
+# Start server
+docker-compose up -d cringesweeper
+
+# Start with monitoring stack (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
+```
+
+**Monitoring Access:**
+- CringeSweeper: http://localhost:8080
+- Prometheus: http://localhost:9090 (with monitoring profile)
+- Grafana: http://localhost:3000 (with monitoring profile)
 
 ## Authentication Setup
 
