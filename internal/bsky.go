@@ -14,14 +14,15 @@ import (
 
 // BlueskyClient implements the SocialClient interface for Bluesky
 type BlueskyClient struct {
-	session    *atpSessionResponse
-	creds      *Credentials
-	sessionExp time.Time // Track when session expires
+	sessionManager *SessionManager
+	session        *atpSessionResponse
 }
 
 // NewBlueskyClient creates a new Bluesky client
 func NewBlueskyClient() *BlueskyClient {
-	return &BlueskyClient{}
+	return &BlueskyClient{
+		sessionManager: NewSessionManager("bluesky"),
+	}
 }
 
 // GetPlatformName returns the platform name
@@ -156,11 +157,14 @@ func (c *BlueskyClient) fetchBlueskyPosts(username string, limit int) ([]bluesky
 
 	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
+	LogHTTPRequest("GET", fullURL)
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch posts: %w", err)
 	}
 	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -294,11 +298,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
+					logger := WithPlatform("bluesky").With().Str("post_id", post.ID).Logger()
 					if err := c.deleteLikeRecord(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to unlike post")
 						fmt.Printf("❌ Failed to unlike post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unlike post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post unliked successfully")
 						fmt.Printf("👍 Unliked post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnlikedCount++
 					}
@@ -310,11 +317,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
 					// For reposts, we need to delete the repost record directly
+					logger := WithPlatform("bluesky").With().Str("post_id", post.ID).Logger()
 					if err := c.deleteRepostRecord(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to unrepost")
 						fmt.Printf("❌ Failed to unrepost from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unrepost post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Repost unshared successfully")
 						fmt.Printf("🔄 Unshared repost from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnsharedCount++
 					}
@@ -332,11 +342,14 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
+					logger := WithPlatform("bluesky").With().Str("post_id", post.ID).Logger()
 					if err := c.deletePost(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to delete post")
 						fmt.Printf("❌ Failed to delete post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to delete post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post deleted successfully")
 						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.DeletedCount++
 					}
@@ -374,29 +387,33 @@ type atpSessionResponse struct {
 // invalidateSession clears the current session (useful when credentials change)
 func (c *BlueskyClient) invalidateSession() {
 	c.session = nil
-	c.creds = nil
-	c.sessionExp = time.Time{}
+	c.sessionManager.ClearSession()
 }
 
 // ensureValidSession ensures we have a valid session, creating/refreshing as needed
 func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionResponse, error) {
+	logger := WithPlatform("bluesky")
+	
 	// If we don't have a session or credentials changed, create new session
-	if c.session == nil || c.creds == nil ||
-		c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword {
-		if c.creds != nil && (c.creds.Username != creds.Username || c.creds.AppPassword != creds.AppPassword) {
+	if c.session == nil || c.sessionManager.HasCredentialsChanged(creds) {
+		if c.sessionManager.HasCredentialsChanged(creds) {
+			logger.Debug().Msg("Credentials changed, creating new Bluesky session")
 			fmt.Printf("🔄 Credentials changed, creating new Bluesky session...\n")
 		} else {
+			logger.Debug().Msg("Creating new Bluesky session")
 			fmt.Printf("🔐 Creating new Bluesky session...\n")
 		}
 		return c.createNewSession(creds)
 	}
 
-	// If session is expired or about to expire (within 5 minutes), try to refresh
-	if time.Now().After(c.sessionExp.Add(-5 * time.Minute)) {
+	// If session is expired or about to expire, try to refresh
+	if !c.sessionManager.IsSessionValid() {
+		logger.Debug().Msg("Session expired, refreshing using refresh token")
 		fmt.Printf("🔄 Refreshing Bluesky session using refresh token...\n")
 		refreshedSession, err := c.refreshSession()
 		if err != nil {
 			// If refresh fails, fall back to creating a new session
+			logger.Debug().Err(err).Msg("Session refresh failed, creating new session")
 			fmt.Printf("⚠️  Refresh failed, creating new session: %v\n", err)
 			return c.createNewSession(creds)
 		}
@@ -404,6 +421,7 @@ func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionRespo
 	}
 
 	// Reusing existing session
+	logger.Debug().Msg("Reusing existing valid session")
 	return c.session, nil
 }
 
@@ -425,7 +443,9 @@ func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", refreshURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", refreshURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request failed: %w", err)
 	}
@@ -450,12 +470,16 @@ func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
 	c.session = &refreshedSession
 
 	// Try to parse actual expiration from refreshed JWT, fall back to 24 hours
+	logger := WithPlatform("bluesky")
 	if expTime, err := c.parseJWTExpiration(refreshedSession.AccessJwt); err == nil {
-		c.sessionExp = expTime
+		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, &Credentials{})
+		logger.Debug().Time("expires_at", expTime).Msg("Session refreshed with parsed expiration")
 		fmt.Printf("✅ Session refreshed, expires at %s\n", expTime.Format("15:04:05"))
 	} else {
 		// Fallback to default 24 hours
-		c.sessionExp = time.Now().Add(24 * time.Hour)
+		expTime := time.Now().Add(24 * time.Hour)
+		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, &Credentials{})
+		logger.Debug().Time("expires_at", expTime).Msg("Session refreshed with default 24h expiration")
 		fmt.Printf("✅ Session refreshed with default 24h expiration\n")
 	}
 
@@ -507,18 +531,18 @@ func (c *BlueskyClient) createNewSession(creds *Credentials) (*atpSessionRespons
 
 	// Store session and credentials for reuse
 	c.session = session
-	c.creds = &Credentials{
-		Username:    creds.Username,
-		AppPassword: creds.AppPassword,
-	}
 
 	// Try to parse actual expiration from JWT, fall back to 24 hours
+	logger := WithPlatform("bluesky")
 	if expTime, err := c.parseJWTExpiration(session.AccessJwt); err == nil {
-		c.sessionExp = expTime
+		c.sessionManager.UpdateSession(session.AccessJwt, session.RefreshJwt, expTime, creds)
+		logger.Debug().Time("expires_at", expTime).Msg("Session created with parsed expiration")
 		fmt.Printf("✅ Session created, expires at %s\n", expTime.Format("15:04:05"))
 	} else {
 		// Fallback to default 24 hours
-		c.sessionExp = time.Now().Add(24 * time.Hour)
+		expTime := time.Now().Add(24 * time.Hour)
+		c.sessionManager.UpdateSession(session.AccessJwt, session.RefreshJwt, expTime, creds)
+		logger.Debug().Time("expires_at", expTime).Msg("Session created with default 24h expiration")
 		fmt.Printf("✅ Session created with default 24h expiration\n")
 	}
 
@@ -547,7 +571,9 @@ func (c *BlueskyClient) createSession(creds *Credentials) (*atpSessionResponse, 
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", sessionURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", sessionURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return nil, fmt.Errorf("session request failed: %w", err)
 	}
@@ -616,7 +642,9 @@ func (c *BlueskyClient) deletePost(creds *Credentials, postURI string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", deleteURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("delete request failed: %w", err)
 	}
@@ -674,7 +702,9 @@ func (c *BlueskyClient) unlikePost(creds *Credentials, postURI string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", deleteURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("unlike request failed: %w", err)
 	}
@@ -727,7 +757,9 @@ func (c *BlueskyClient) unrepost(creds *Credentials, postURI string) error {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", deleteURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("unrepost request failed: %w", err)
 	}
@@ -771,7 +803,9 @@ func (c *BlueskyClient) findLikeRecord(session *atpSessionResponse, postURI stri
 		req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
 
 		client := &http.Client{Timeout: 30 * time.Second}
+		LogHTTPRequest("GET", fullURL)
 		resp, err := client.Do(req)
+		LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 		if err != nil {
 			return "", fmt.Errorf("list request failed: %w", err)
 		}
@@ -854,7 +888,9 @@ func (c *BlueskyClient) findRepostRecord(session *atpSessionResponse, postURI st
 		req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
 
 		client := &http.Client{Timeout: 30 * time.Second}
+		LogHTTPRequest("GET", fullURL)
 		resp, err := client.Do(req)
+		LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 		if err != nil {
 			return "", fmt.Errorf("list request failed: %w", err)
 		}
@@ -911,7 +947,9 @@ func (c *BlueskyClient) findRepostRecord(session *atpSessionResponse, postURI st
 func (c *BlueskyClient) resolveDID(did string) error {
 	resolveURL := fmt.Sprintf("https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=%s", did)
 
+	LogHTTPRequest("GET", resolveURL)
 	resp, err := http.Get(resolveURL)
+	LogHTTPResponse("GET", resolveURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("failed to resolve DID %s: %w", did, err)
 	}
@@ -959,7 +997,9 @@ func (c *BlueskyClient) fetchRepostPosts(session *atpSessionResponse, limit int)
 	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("GET", fullURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return nil, fmt.Errorf("list request failed: %w", err)
 	}
@@ -1025,7 +1065,9 @@ func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) 
 	req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("GET", fullURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return nil, fmt.Errorf("list request failed: %w", err)
 	}
@@ -1117,7 +1159,9 @@ func (c *BlueskyClient) deleteLikeRecord(creds *Credentials, likeURI string) err
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", deleteURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("delete request failed: %w", err)
 	}
@@ -1176,7 +1220,9 @@ func (c *BlueskyClient) deleteRepostRecord(creds *Credentials, repostURI string)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	LogHTTPRequest("POST", deleteURL)
 	resp, err := client.Do(req)
+	LogHTTPResponse("POST", deleteURL, resp.StatusCode, resp.Status)
 	if err != nil {
 		return fmt.Errorf("delete request failed: %w", err)
 	}

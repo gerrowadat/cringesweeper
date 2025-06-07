@@ -6,8 +6,11 @@ package cmd
 import (
 	"os"
 
+	"github.com/gerrowadat/cringesweeper/internal"
 	"github.com/spf13/cobra"
 )
+
+var logLevel string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -24,9 +27,10 @@ Key features:
 • Support for multiple post types (original, reposts, replies, quotes)
 
 Use 'cringesweeper [command] --help' for detailed information about each command.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Initialize logger with the specified log level before any command runs
+		internal.InitLoggerWithLevel(logLevel)
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -44,6 +48,9 @@ func init() {
 	// will be global for your application.
 
 	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cringesweeper.yaml)")
+
+	// Add log level flag that applies to all commands
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the logging level (debug, info, warn, error)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.

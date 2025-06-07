@@ -187,3 +187,212 @@ This conversation demonstrates a complete debugging and improvement cycle for a 
 - **Enhanced reusability**: Easy to add new social platforms
 
 The refactoring maintains full functionality while significantly improving code organization and reducing maintenance overhead. Tests pass and the existing API remains unchanged.
+
+**User:** commit the current code with a meaningful commit message
+
+**Assistant:** Successfully committed the refactoring changes with a comprehensive commit message:
+
+```
+Refactor: Extract common functionality to reduce code duplication
+
+- Move shared session management, HTTP client utilities, and helper functions to social.go
+- Add SessionManager for unified credential handling and session state
+- Add AuthenticatedHTTPClient for standardized HTTP request patterns  
+- Extract common utilities: TruncateContent, ValidateURIOwnership, ExtractPostIDFromURI
+- Add unified rate limiting and API request patterns (ExecuteListRequest, ExecuteDeleteRequest)
+- Update Bluesky and Mastodon clients to use common functionality
+- Eliminate ~200 lines of duplicate code while maintaining full functionality
+- Improve maintainability and prepare for easier addition of new social platforms
+```
+
+**Files committed:**
+- `internal/social.go` - New common functionality
+- `internal/bsky.go` - Updated to use shared utilities  
+- `internal/mastodon.go` - Updated to use shared utilities
+- `internal/bsky_test.go` - Updated test function calls
+- `internal/mastodon_test.go` - Updated test function calls
+- `claude-conversation.md` - Updated conversation log
+
+Commit hash: `bee2bcd`
+
+**User:** add logging throughout, using zlog. All HTTP calls and re-authentication should be at level DEBUG, write calls like deletes and unlikes should be INFO, with errors being anything unexpected as a result of external calls.
+
+**Assistant:** I successfully implemented comprehensive logging throughout the codebase using zerolog with the requested log levels:
+
+## Logging Implementation:
+
+### 1. **Dependencies and Setup**
+- Added `github.com/rs/zerolog v1.34.0` to go.mod
+- Created `internal/logger.go` with configuration and helper functions
+- Updated `cringesweeper.go` to initialize logging on startup
+
+### 2. **Log Levels Implemented**
+- **DEBUG**: All HTTP calls and authentication operations
+- **INFO**: Write operations (deletes, unlikes, unshares)
+- **ERROR**: Unexpected external call failures
+
+### 3. **HTTP Request Logging** (DEBUG)
+Added to `AuthenticatedHTTPClient.DoRequest()` in `social.go:242-256`:
+```go
+logger := WithHTTP(req.Method, req.URL.String())
+logger.Debug().Msg("Making HTTP request")
+```
+
+### 4. **Authentication Logging** (DEBUG)
+- **Bluesky session creation/refresh**: `bsky.go:397-422`
+- **Mastodon authentication setup**: `mastodon.go:547`
+
+### 5. **Write Operation Logging** (INFO)
+Throughout both platforms:
+- **Post deletions**: `logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post deleted successfully")`
+- **Unlike operations**: `logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post unliked successfully")`
+- **Unshare operations**: `logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Repost unshared successfully")`
+
+### 6. **Error Logging**
+- **HTTP failures**: `ParseErrorResponse()` in `social.go:264-268`
+- **Operation failures**: Throughout deletion methods
+
+### 7. **Helper Functions**
+- `WithPlatform()`: Platform-specific logging context
+- `WithHTTP()`: HTTP request logging context
+- `WithOperation()`: Operation-specific logging context
+
+## Testing Results:
+Successfully tested with:
+```bash
+LOG_LEVEL=DEBUG ./cringesweeper prune --platform=bluesky --dry-run --max-post-age=1h gerrowadat.bsky.social
+```
+
+Output shows proper DEBUG logs for session creation and authentication, confirming the implementation works as requested.
+
+## Configuration:
+- **Environment variable**: `LOG_LEVEL` (DEBUG, INFO, WARN, ERROR)
+- **Default level**: INFO
+- **Console output**: Timestamped with colors
+
+The logging system is now fully operational with appropriate log levels for monitoring HTTP activity, authentication flows, and write operations while properly capturing errors from external API calls.
+
+**User:** make the log level tuneable with a top-level flag
+
+**Assistant:** I successfully added a top-level `--log-level` flag to make log level tunable via command line arguments:
+
+## Changes Made:
+
+### 1. **Root Command Updates** (`cmd/root.go`)
+- Added `--log-level` persistent flag with default value "info"
+- Added `PersistentPreRun` function to initialize logger before any command runs
+- Flag applies to all subcommands globally
+
+### 2. **Logger Enhancement** (`internal/logger.go`)
+- Added `InitLoggerWithLevel()` function that accepts a specific log level
+- Modified `InitLogger()` to maintain backwards compatibility with environment variables
+- Changed logger initialization message to DEBUG level
+
+### 3. **Main Entry Point** (`cringesweeper.go`)
+- Removed direct logger initialization since it's now handled by the root command
+- Logger is initialized via `PersistentPreRun` which respects the flag value
+
+## Usage Examples:
+
+```bash
+# Use default INFO level
+./cringesweeper ls username
+
+# Use DEBUG level for detailed logging  
+./cringesweeper --log-level=debug prune --dry-run username
+
+# Use ERROR level for quiet operation
+./cringesweeper --log-level=error prune username
+```
+
+## Features:
+- **Accepts**: `debug`, `info`, `warn`, `error` (case-insensitive)
+- **Global flag**: Works with all subcommands
+- **Backwards compatible**: `LOG_LEVEL` environment variable still works as fallback
+- **Help integration**: Shows in `--help` output for all commands
+
+## Test Results:
+```bash
+./cringesweeper --help
+```
+Shows: `--log-level string   Set the logging level (debug, info, warn, error) (default "info")`
+
+The flag system allows users to easily control verbosity without needing to set environment variables, making it much more user-friendly for debugging and operational use.
+
+**User:** I want to see a debug log line for literally every http request we make, no exceptions. Even as a side-effect stuff like authentication. Show the full URL in each case. Redact any sensitive information in URLs.
+
+**Assistant:** I successfully implemented comprehensive HTTP request logging with full URL visibility and sensitive information redaction:
+
+## Changes Made:
+
+### 1. **Enhanced Logger Functions** (`internal/logger.go`)
+- Added `RedactSensitiveURL()` function that redacts:
+  - Password, token, access_token, refresh_token, bearer, authorization parameters
+  - app_password and apppassword parameters  
+  - JWT tokens in URL paths (identified by `eyJ` prefix pattern)
+- Added `LogHTTPRequest()` and `LogHTTPResponse()` helper functions
+- Updated `WithHTTP()` to use redacted URLs
+
+### 2. **Complete HTTP Request Coverage**
+Added logging to **every single HTTP request** in the codebase:
+
+**Mastodon Client (3 requests):**
+- Account lookup: `mastodon.go:182`
+- Public status fetching: `mastodon.go:222` 
+- Authenticated status fetching: `mastodon.go:268`
+
+**Bluesky Client (13 requests):**
+- Public post fetching: `bsky.go:160`
+- Session refresh: `bsky.go:443`
+- Session creation: `bsky.go:569`
+- Post deletion: `bsky.go:638`
+- Like record deletion: `bsky.go:696`
+- Repost record deletion: `bsky.go:749`
+- Like record search (paginated): `bsky.go:793`
+- Repost record search (paginated): `bsky.go:876`
+- DID resolution: `bsky.go:933`
+- Repost record fetching: `bsky.go:981`
+- Liked posts fetching: `bsky.go:1047`
+- Direct like record deletion: `bsky.go:1139`
+- Direct repost record deletion: `bsky.go:1198`
+
+**Shared Infrastructure:**
+- All `AuthenticatedHTTPClient` requests: `social.go:242`
+
+### 3. **Logging Pattern Applied**
+For each HTTP request:
+- `LogHTTPRequest(method, url)` before the request
+- `LogHTTPResponse(method, url, statusCode, status)` after the request
+- Both show full URLs with sensitive information redacted
+
+### 4. **Security Features**
+URL redaction automatically handles:
+```
+Original: https://example.com/api?password=secret123&token=abc123&normal_param=value
+Redacted: https://example.com/api?password=***REDACTED***&token=***REDACTED***&normal_param=value
+
+Original: https://example.com/path/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c/more
+Redacted: https://example.com/path/***JWT_TOKEN***/more
+```
+
+## Test Results:
+```bash
+./cringesweeper --log-level=debug ls test.user.bsky.social
+```
+Shows:
+```
+DBG Logger initialized
+DBG Making HTTP request http_method=GET url=https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=test.user.bsky.social&filter=posts_with_replies&include_pins=true&limit=10
+DBG HTTP request completed http_method=GET status="400 Bad Request" status_code=400 url=https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=test.user.bsky.social&filter=posts_with_replies&include_pins=true&limit=10
+```
+
+## Key Features:
+- **Complete coverage**: Every HTTP request is logged, no exceptions
+- **Full URLs**: Shows complete URLs with query parameters
+- **Security first**: Automatic redaction of sensitive information
+- **DEBUG level**: All HTTP logging at debug level as requested
+- **Performance aware**: Redaction only happens when DEBUG logging is enabled
+
+The implementation ensures **zero HTTP requests go unlogged** while maintaining security through proper redaction of passwords, tokens, and other sensitive URL components.
+
+**User:** update claude-conversation.md to add the things we've said since the last time you updated it.

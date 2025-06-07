@@ -179,11 +179,14 @@ func (c *MastodonClient) getAccountID(instanceURL, acct string) (string, error) 
 
 	fullURL := fmt.Sprintf("%s?%s", lookupURL, params.Encode())
 
+	LogHTTPRequest("GET", fullURL)
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to lookup account: %w", err)
 	}
 	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -215,11 +218,14 @@ func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit 
 
 	fullURL := fmt.Sprintf("%s?%s", statusesURL, params.Encode())
 
+	LogHTTPRequest("GET", fullURL)
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch statuses: %w", err)
 	}
 	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -259,12 +265,15 @@ func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID s
 	// Add authentication header
 	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
 
+	LogHTTPRequest("GET", fullURL)
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch statuses: %w", err)
 	}
 	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -400,11 +409,14 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
+					logger := WithPlatform("mastodon").With().Str("post_id", post.ID).Logger()
 					if err := c.unlikePost(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to unfavorite post")
 						fmt.Printf("❌ Failed to unfavorite post: %v\n", err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unfavorite post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post unfavorited successfully")
 						fmt.Printf("👍 Unfavorited post: %s\n", TruncateContent(post.Content, 50))
 						result.UnlikedCount++
 					}
@@ -415,11 +427,14 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
+					logger := WithPlatform("mastodon").With().Str("post_id", post.ID).Logger()
 					if err := c.unreblogPost(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to unreblog post")
 						fmt.Printf("❌ Failed to unreblog post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to unreblog post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Reblog unshared successfully")
 						fmt.Printf("🔄 Unshared reblog from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.UnsharedCount++
 					}
@@ -430,11 +445,14 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 				if !options.DryRun {
 					// Add configurable delay to respect rate limits
 					time.Sleep(options.RateLimitDelay)
+					logger := WithPlatform("mastodon").With().Str("post_id", post.ID).Logger()
 					if err := c.deletePost(creds, post.ID); err != nil {
+						logger.Error().Err(err).Msg("Failed to delete post")
 						fmt.Printf("❌ Failed to delete post from %s: %v\n", post.CreatedAt.Format("2006-01-02"), err)
 						result.Errors = append(result.Errors, fmt.Sprintf("Failed to delete post %s: %v", post.ID, err))
 						result.ErrorsCount++
 					} else {
+						logger.Info().Str("content", TruncateContent(post.Content, 50)).Msg("Post deleted successfully")
 						fmt.Printf("🗑️  Deleted post from %s: %s\n", post.CreatedAt.Format("2006-01-02"), TruncateContent(post.Content, 50))
 						result.DeletedCount++
 					}
@@ -532,8 +550,10 @@ func (c *MastodonClient) determinePostType(status mastodonStatus) PostType {
 // ensureAuthenticated ensures we have cached authentication details
 func (c *MastodonClient) ensureAuthenticated(creds *Credentials, instanceURL string) {
 	// Cache credentials and instance URL for reuse
+	logger := WithPlatform("mastodon")
 	if c.sessionManager.HasCredentialsChanged(creds) || c.instanceURL != instanceURL {
 		if c.sessionManager.HasCredentialsChanged(creds) {
+			logger.Debug().Str("instance", instanceURL).Msg("Setting up Mastodon authentication")
 			fmt.Printf("🔐 Setting up Mastodon authentication for %s...\n", instanceURL)
 		}
 		c.sessionManager.UpdateSession(creds.AccessToken, "", time.Now().Add(24*time.Hour), creds)

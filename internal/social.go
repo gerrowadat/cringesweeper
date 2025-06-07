@@ -239,13 +239,32 @@ func (ahc *AuthenticatedHTTPClient) CreateRequest(method, path string, body io.R
 
 // DoRequest executes an HTTP request and returns the response
 func (ahc *AuthenticatedHTTPClient) DoRequest(req *http.Request) (*http.Response, error) {
-	return ahc.client.Do(req)
+	LogHTTPRequest(req.Method, req.URL.String())
+	
+	resp, err := ahc.client.Do(req)
+	if err != nil {
+		logger := WithHTTP(req.Method, req.URL.String())
+		logger.Error().Err(err).Msg("HTTP request failed")
+		return nil, err
+	}
+	
+	LogHTTPResponse(req.Method, req.URL.String(), resp.StatusCode, resp.Status)
+	
+	return resp, nil
 }
 
 // ParseErrorResponse extracts error information from HTTP response
 func ParseErrorResponse(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	err := fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	
+	logger := WithHTTP("RESPONSE", resp.Request.URL.String())
+	logger.Error().
+		Int("status_code", resp.StatusCode).
+		Str("response_body", string(body)).
+		Msg("API request failed")
+	
+	return err
 }
 
 // TruncateContent truncates content for display in progress messages
@@ -289,6 +308,14 @@ type APIListRequest struct {
 
 // ExecuteListRequest executes a paginated list request and returns the response body
 func ExecuteListRequest(client *AuthenticatedHTTPClient, request APIListRequest) ([]byte, error) {
+	logger := WithOperation("list_request")
+	logger.Debug().
+		Str("url", request.URL).
+		Int("limit", request.Limit).
+		Str("collection", request.Collection).
+		Str("repo", request.Repo).
+		Msg("Executing list request")
+	
 	params := url.Values{}
 	for k, v := range request.Params {
 		params[k] = v
@@ -313,11 +340,13 @@ func ExecuteListRequest(client *AuthenticatedHTTPClient, request APIListRequest)
 	
 	req, err := client.CreateRequest("GET", fullURL, nil)
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to create list request")
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	
 	resp, err := client.DoRequest(req)
 	if err != nil {
+		logger.Error().Err(err).Msg("List request failed")
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -328,8 +357,13 @@ func ExecuteListRequest(client *AuthenticatedHTTPClient, request APIListRequest)
 	
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to read list response body")
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+	
+	logger.Debug().
+		Int("response_size", len(body)).
+		Msg("List request completed successfully")
 	
 	return body, nil
 }
@@ -343,6 +377,13 @@ type DeleteRecordRequest struct {
 
 // ExecuteDeleteRequest executes a delete record request
 func ExecuteDeleteRequest(client *AuthenticatedHTTPClient, deleteURL string, request DeleteRecordRequest) error {
+	logger := WithOperation("delete_request")
+	logger.Info().
+		Str("repo", request.Repo).
+		Str("collection", request.Collection).
+		Str("rkey", request.RKey).
+		Msg("Executing delete request")
+	
 	deleteData := map[string]string{
 		"repo":       request.Repo,
 		"collection": request.Collection,
@@ -351,16 +392,19 @@ func ExecuteDeleteRequest(client *AuthenticatedHTTPClient, deleteURL string, req
 	
 	jsonData, err := json.Marshal(deleteData)
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to marshal delete data")
 		return fmt.Errorf("failed to marshal delete data: %w", err)
 	}
 	
 	req, err := client.CreateRequest("POST", deleteURL, strings.NewReader(string(jsonData)))
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to create delete request")
 		return fmt.Errorf("failed to create delete request: %w", err)
 	}
 	
 	resp, err := client.DoRequest(req)
 	if err != nil {
+		logger.Error().Err(err).Msg("Delete request failed")
 		return fmt.Errorf("delete request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -369,6 +413,7 @@ func ExecuteDeleteRequest(client *AuthenticatedHTTPClient, deleteURL string, req
 		return ParseErrorResponse(resp)
 	}
 	
+	logger.Info().Msg("Delete request completed successfully")
 	return nil
 }
 
