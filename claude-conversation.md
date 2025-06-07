@@ -904,3 +904,47 @@ This optimization significantly improves the efficiency of the `ls` command, esp
 The codebase is now cleaner with VSCode warnings resolved while maintaining all existing functionality and test coverage.
 
 **Commit:** `9e4bd80` - "Fix VSCode warnings: remove unused code and redundant formatting"
+
+**User:** there are still unused methods in bsky.go
+
+**Assistant:** You're absolutely right! I found and removed several unused methods from `bsky.go` that VSCode was flagging:
+
+## Unused Methods Removed
+
+### 1. **`unlikePost()` method** (lines 769-826)
+- **Issue**: Defined in BlueskyClient but never called
+- **Confusion**: Mastodon has its own `unlikePost` method that IS used
+- **Resolution**: Removed the unused Bluesky version
+
+### 2. **`unrepost()` method** (lines 834-886)  
+- **Issue**: Complete method implementation but no callers
+- **Purpose**: Was for removing reposts, but unused
+- **Resolution**: Removed entirely
+
+### 3. **`resolveDID()` method** (lines 1005-1022)
+- **Issue**: DID resolution functionality but no usage
+- **Purpose**: Was for validating DIDs, but unused  
+- **Resolution**: Removed entirely
+
+### 4. **`invalidateSession()` method** (lines 500-503)
+- **Issue**: Session management method but no callers
+- **Purpose**: Was for clearing sessions, but unused
+- **Resolution**: Removed entirely
+
+## Verification Process
+
+1. **Systematic search**: Checked each method for actual usage with `grep -r "\.methodName(" . --include="*.go"`
+2. **Confirmed unused**: All four methods had zero callers in the codebase
+3. **Preserved used methods**: Kept methods like `findLikeRecord`, `findRepostRecord` that ARE called
+4. **Build verification**: `go build` and `go vet ./...` pass cleanly
+
+## Impact
+
+- **Reduced codebase**: Removed ~140 lines of dead code
+- **Cleaner interface**: BlueskyClient now only contains methods that are actually used
+- **VSCode happy**: No more unused method warnings
+- **No functionality lost**: All removed methods were unreachable dead code
+
+The BlueskyClient is now much cleaner with only the methods that are actually called by the application, eliminating the VSCode warnings about unused code.
+
+**Commit:** `a34dea2` - "Remove unused methods from BlueskyClient to fix VSCode warnings"
