@@ -25,6 +25,9 @@ Posts can be processed by maximum age (e.g., older than 30 days) or before a spe
 date. Smart preservation rules protect important content like pinned posts and 
 posts you've liked.
 
+By default, only processes recent posts (typically 100 most recent). Use --continue 
+to keep searching further back in time until no more posts match your criteria.
+
 ALWAYS use --dry-run first to preview what would be processed. Actions are 
 permanent and cannot be undone. Requires authentication for the target platform.`,
 	Args: cobra.MaximumNArgs(1),
@@ -35,6 +38,7 @@ permanent and cannot be undone. Requires authentication for the target platform.
 		preservePinned, _ := cmd.Flags().GetBool("preserve-pinned")
 		unlikePosts, _ := cmd.Flags().GetBool("unlike-posts")
 		unshareReposts, _ := cmd.Flags().GetBool("unshare-reposts")
+		continueUntilEnd, _ := cmd.Flags().GetBool("continue")
 		maxAgeStr, _ := cmd.Flags().GetString("max-post-age")
 		beforeDateStr, _ := cmd.Flags().GetString("before-date")
 		rateLimitDelayStr, _ := cmd.Flags().GetString("rate-limit-delay")
@@ -115,15 +119,124 @@ permanent and cannot be undone. Requires authentication for the target platform.
 		}
 
 		// Perform pruning
+		if continueUntilEnd {
+			performContinuousPruning(client, username, options)
+		} else {
+			result, err := client.PrunePosts(username, options)
+			if err != nil {
+				fmt.Printf("Error pruning posts from %s: %v\n", client.GetPlatformName(), err)
+				os.Exit(1)
+			}
+
+			// Display results
+			displayPruneResults(result, client.GetPlatformName(), dryRun)
+		}
+	},
+}
+
+func performContinuousPruning(client internal.SocialClient, username string, options internal.PruneOptions) {
+	platform := client.GetPlatformName()
+	totalDeleted := 0
+	totalUnliked := 0
+	totalUnshared := 0
+	totalPreserved := 0
+	totalErrors := 0
+	var allErrors []string
+	round := 1
+
+	fmt.Printf("Starting continuous pruning on %s (will continue until no more posts match criteria)...\n", platform)
+	if options.DryRun {
+		fmt.Println("DRY RUN MODE: No actual actions will be performed\n")
+	}
+
+	for {
+		fmt.Printf("Round %d: Fetching posts...\n", round)
+		
 		result, err := client.PrunePosts(username, options)
 		if err != nil {
-			fmt.Printf("Error pruning posts from %s: %v\n", client.GetPlatformName(), err)
-			os.Exit(1)
+			fmt.Printf("Error in round %d: %v\n", round, err)
+			fmt.Printf("Stopping continuous pruning. Total processed so far:\n")
+			break
 		}
 
-		// Display results
-		displayPruneResults(result, client.GetPlatformName(), dryRun)
-	},
+		// Check if we found any posts to process
+		postsProcessed := len(result.PostsToDelete) + len(result.PostsToUnlike) + len(result.PostsToUnshare)
+		if postsProcessed == 0 {
+			fmt.Printf("Round %d: No more posts match the criteria. Pruning complete!\n", round)
+			break
+		}
+
+		// Update totals
+		totalDeleted += result.DeletedCount
+		totalUnliked += result.UnlikedCount
+		totalUnshared += result.UnsharedCount
+		totalPreserved += result.PreservedCount
+		totalErrors += result.ErrorsCount
+		allErrors = append(allErrors, result.Errors...)
+
+		// Show round results
+		fmt.Printf("Round %d results:\n", round)
+		if options.DryRun {
+			if len(result.PostsToDelete) > 0 {
+				fmt.Printf("  Would delete: %d posts\n", len(result.PostsToDelete))
+			}
+			if len(result.PostsToUnlike) > 0 {
+				fmt.Printf("  Would unlike: %d posts\n", len(result.PostsToUnlike))
+			}
+			if len(result.PostsToUnshare) > 0 {
+				fmt.Printf("  Would unshare: %d posts\n", len(result.PostsToUnshare))
+			}
+		} else {
+			if result.DeletedCount > 0 {
+				fmt.Printf("  Deleted: %d posts\n", result.DeletedCount)
+			}
+			if result.UnlikedCount > 0 {
+				fmt.Printf("  Unliked: %d posts\n", result.UnlikedCount)
+			}
+			if result.UnsharedCount > 0 {
+				fmt.Printf("  Unshared: %d posts\n", result.UnsharedCount)
+			}
+		}
+		if result.PreservedCount > 0 {
+			fmt.Printf("  Preserved: %d posts\n", result.PreservedCount)
+		}
+		if result.ErrorsCount > 0 {
+			fmt.Printf("  Errors: %d\n", result.ErrorsCount)
+		}
+		fmt.Println()
+
+		round++
+
+		// Small delay between rounds to be respectful to APIs
+		if !options.DryRun {
+			time.Sleep(time.Second * 2)
+		}
+	}
+
+	// Display final summary
+	fmt.Printf("=== CONTINUOUS PRUNING COMPLETE ===\n")
+	fmt.Printf("Total rounds: %d\n", round-1)
+	if options.DryRun {
+		fmt.Printf("DRY RUN - Would have processed:\n")
+		fmt.Printf("  Total deletions: %d\n", totalDeleted)
+		fmt.Printf("  Total unlikes: %d\n", totalUnliked) 
+		fmt.Printf("  Total unshares: %d\n", totalUnshared)
+	} else {
+		fmt.Printf("Actually processed:\n")
+		fmt.Printf("  Total deleted: %d\n", totalDeleted)
+		fmt.Printf("  Total unliked: %d\n", totalUnliked)
+		fmt.Printf("  Total unshared: %d\n", totalUnshared)
+	}
+	fmt.Printf("  Total preserved: %d\n", totalPreserved)
+	if totalErrors > 0 {
+		fmt.Printf("  Total errors: %d\n", totalErrors)
+		if len(allErrors) > 0 {
+			fmt.Println("  Error details:")
+			for _, err := range allErrors {
+				fmt.Printf("    - %s\n", err)
+			}
+		}
+	}
 }
 
 func parseDuration(s string) (time.Duration, error) {
@@ -308,6 +421,7 @@ func init() {
 	pruneCmd.Flags().Bool("preserve-pinned", false, "Don't delete pinned posts")
 	pruneCmd.Flags().Bool("unlike-posts", false, "Unlike posts instead of deleting them")
 	pruneCmd.Flags().Bool("unshare-reposts", false, "Unshare/unrepost instead of deleting reposts")
+	pruneCmd.Flags().Bool("continue", false, "Continue searching and processing posts until no more match the criteria")
 	pruneCmd.Flags().Bool("dry-run", false, "Show what would be deleted without actually deleting")
 	pruneCmd.Flags().String("rate-limit-delay", "", "Delay between API requests to respect rate limits (default: 60s for Mastodon, 1s for Bluesky)")
 }

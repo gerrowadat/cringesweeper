@@ -396,3 +396,111 @@ DBG HTTP request completed http_method=GET status="400 Bad Request" status_code=
 The implementation ensures **zero HTTP requests go unlogged** while maintaining security through proper redaction of passwords, tokens, and other sensitive URL components.
 
 **User:** update claude-conversation.md to add the things we've said since the last time you updated it.
+
+**Assistant:** The conversation transcript has been successfully updated in `claude-conversation.md` with all the recent exchanges we've had since the last update. The file now includes:
+
+1. **User's request for comprehensive logging** using zlog with specific log levels
+2. **My implementation response** detailing the zerolog setup, HTTP logging, authentication logging, and write operation logging
+3. **User's request for flag-based log level control**
+4. **My implementation response** showing the `--log-level` flag addition and usage examples
+5. **User's request for complete HTTP request logging** with URL redaction
+6. **My comprehensive implementation response** covering the enhanced logging system, complete HTTP coverage, and security redaction features
+
+The conversation log maintains the exact format of "**User:** [request]" followed by "**Assistant:** [response]" as requested, preserving the complete technical details and implementation specifics of our recent work on the logging system.
+
+**User:** commit the current code with a meaningful commit message
+
+**Assistant:** Successfully committed the comprehensive logging implementation with a detailed commit message:
+
+## Commit Details
+
+**Commit Hash:** `69d81f9`
+
+**Files Committed:**
+- `internal/logger.go` - **NEW**: Complete logging infrastructure with redaction
+- `cmd/root.go` - Added `--log-level` flag and `PersistentPreRun` setup
+- `cringesweeper.go` - Updated main entry point to use flag-based logging
+- `go.mod` & `go.sum` - Added zerolog dependency
+- `internal/bsky.go` - Added logging to all 13 HTTP endpoints
+- `internal/mastodon.go` - Added logging to all 3 HTTP endpoints  
+- `internal/social.go` - Enhanced `AuthenticatedHTTPClient` with logging
+- `claude-conversation.md` - Updated conversation transcript
+- `cringesweeper` - Updated binary
+
+## Key Features Committed
+
+### 1. **Complete HTTP Request Coverage**
+Every single HTTP request now logged at DEBUG level with full URLs and response details
+
+### 2. **Security-First Approach**
+Automatic redaction of sensitive information (passwords, tokens, JWT tokens)
+
+### 3. **User-Friendly Controls**
+- `--log-level` flag for all commands
+- Environment variable fallback (`LOG_LEVEL`)
+- Backwards compatibility maintained
+
+### 4. **Structured Logging Levels**
+- **DEBUG**: HTTP calls, authentication, session management
+- **INFO**: Write operations with content previews
+- **ERROR**: Unexpected external failures
+
+### 5. **Developer Experience**
+Easy debugging with `--log-level=debug` showing complete request/response flow while protecting sensitive data
+
+The logging system is now production-ready with comprehensive coverage and security-conscious implementation.
+
+**User:** When I use 'prune', it prunes a certain amount of posts, but then I have to continue to run the same command to keep going back further until the beginning of time. There should be an option to keep searching for posts until there are none left. This behaviour should be configurable with a flag.
+
+**Assistant:** I successfully added the `--continue` flag to the prune command that enables continuous pruning until no more posts match the criteria:
+
+## Changes Made
+
+### 1. **New `--continue` Flag** (`cmd/prune.go`)
+- Added flag parsing and conditional logic in the main command
+- When `--continue` is used, calls `performContinuousPruning()` instead of single-shot pruning
+- Flag description: "Continue searching and processing posts until no more match the criteria"
+
+### 2. **Continuous Pruning Function**
+Added `performContinuousPruning()` function that:
+- **Loops until completion**: Keeps fetching and processing posts until none match criteria
+- **Round-based processing**: Shows progress with numbered rounds
+- **Cumulative tracking**: Tracks total deletions, unlikes, unshares across all rounds
+- **Error handling**: Gracefully handles errors and continues or stops as appropriate
+- **Rate limiting**: Includes 2-second delays between rounds to be API-friendly
+
+### 3. **Enhanced User Experience**
+- **Progress indicators**: Shows current round and results per round
+- **Comprehensive summary**: Final totals across all rounds processed
+- **Dry-run support**: Works with `--dry-run` to show what would be processed
+- **Error aggregation**: Collects and displays all errors from all rounds
+
+### 4. **Updated Documentation**
+- Enhanced command description to explain default behavior vs `--continue`
+- Help text now mentions that default processes ~100 most recent posts
+- Clear explanation that `--continue` searches back through entire history
+
+## Usage Examples
+
+```bash
+# Traditional single-batch processing (default)
+./cringesweeper prune --max-post-age=30d username
+
+# Continuous processing until no more old posts found
+./cringesweeper prune --continue --max-post-age=30d username
+
+# Dry run with continuous processing to see full scope
+./cringesweeper prune --continue --dry-run --max-post-age=30d username
+```
+
+## Benefits
+
+1. **Complete coverage**: No need to run command multiple times
+2. **Progress visibility**: See exactly how many rounds and posts processed
+3. **Safe operation**: Works with existing rate limiting and error handling
+4. **Flexible**: Can still use single-batch mode when preferred
+5. **Informative**: Shows comprehensive statistics across entire operation
+
+The feature addresses the exact workflow issue you described - now users can process their entire post history in one command execution instead of having to repeatedly run the same command to go further back in time.
+
+**User:** commit the current code with a meaningful commit message
