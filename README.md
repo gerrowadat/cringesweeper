@@ -291,21 +291,23 @@ MASTODON_USERNAME=user MASTODON_ACCESS_TOKEN=token MASTODON_INSTANCE=https://mas
 
 **Docker Deployment:**
 ```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your credentials
+# Build the image
+docker build -t cringesweeper .
 
-# Start server
-docker-compose up -d cringesweeper
+# Run with environment variables
+docker run -d \
+  -p 8080:8080 \
+  -e BLUESKY_USERNAME=user.bsky.social \
+  -e BLUESKY_APP_PASSWORD=your-app-password \
+  cringesweeper server --platform=bluesky --max-post-age=30d --preserve-pinned
 
-# Start with monitoring stack (Prometheus + Grafana)
-docker-compose --profile monitoring up -d
+# Or using env file
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platform=bluesky --max-post-age=30d
 ```
 
-**Monitoring Access:**
-- CringeSweeper: http://localhost:8080
-- Prometheus: http://localhost:9090 (with monitoring profile)
-- Grafana: http://localhost:3000 (with monitoring profile)
+**Access:**
+- Health check: http://localhost:8080
+- Metrics: http://localhost:8080/metrics
 
 ## Authentication Setup
 

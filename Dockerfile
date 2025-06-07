@@ -16,8 +16,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o cringesweeper .
+# Build arguments for version information
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+# Build the application with version information
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -installsuffix cgo \
+    -ldflags "-X github.com/gerrowadat/cringesweeper/internal.Version=${VERSION} \
+              -X github.com/gerrowadat/cringesweeper/internal.Commit=${COMMIT} \
+              -X github.com/gerrowadat/cringesweeper/internal.BuildTime=${BUILD_TIME}" \
+    -o cringesweeper .
 
 # Runtime stage
 FROM alpine:latest

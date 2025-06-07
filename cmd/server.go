@@ -59,6 +59,14 @@ var (
 		},
 		[]string{"method", "path", "status"},
 	)
+	
+	versionInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cringesweeper_version_info",
+			Help: "Version information for CringeSweeper",
+		},
+		[]string{"version", "commit", "build_time"},
+	)
 )
 
 func init() {
@@ -68,6 +76,7 @@ func init() {
 	prometheus.MustRegister(pruneRunDuration)
 	prometheus.MustRegister(lastPruneTime)
 	prometheus.MustRegister(httpRequestsTotal)
+	prometheus.MustRegister(versionInfo)
 }
 
 var serverCmd = &cobra.Command{
@@ -218,6 +227,10 @@ func startServer(client internal.SocialClient, username string, options internal
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Initialize version metrics
+	version := internal.GetFullVersionInfo()
+	versionInfo.WithLabelValues(version["version"], version["commit"], version["build_time"]).Set(1)
+
 	// Setup HTTP server
 	mux := http.NewServeMux()
 	
@@ -229,6 +242,8 @@ func startServer(client internal.SocialClient, username string, options internal
 			httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, status).Inc()
 		}()
 
+		versionInfo := internal.GetFullVersionInfo()
+		
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
@@ -239,6 +254,7 @@ func startServer(client internal.SocialClient, username string, options internal
         .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
         .running { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .version { background-color: #f8f9fa; color: #495057; border: 1px solid #dee2e6; }
         code { background-color: #f8f9fa; padding: 2px 4px; border-radius: 3px; }
     </style>
 </head>
@@ -246,6 +262,11 @@ func startServer(client internal.SocialClient, username string, options internal
     <h1>🧹 CringeSweeper Server</h1>
     <div class="status running">
         <strong>Status:</strong> Running
+    </div>
+    <div class="version">
+        <p><strong>Version:</strong> %s</p>
+        <p><strong>Commit:</strong> %s</p>
+        <p><strong>Build Time:</strong> %s</p>
     </div>
     <div class="info">
         <p><strong>Platform:</strong> %s</p>
@@ -269,7 +290,7 @@ func startServer(client internal.SocialClient, username string, options internal
         <li><code>cringesweeper_last_prune_timestamp</code> - Last prune timestamp</li>
     </ul>
 </body>
-</html>`, platform, username, pruneInterval, options.DryRun, time.Now().Format("2006-01-02 15:04:05 UTC"))
+</html>`, versionInfo["version"], versionInfo["commit"], versionInfo["build_time"], platform, username, pruneInterval, options.DryRun, time.Now().Format("2006-01-02 15:04:05 UTC"))
 
 		log.Debug().
 			Str("method", r.Method).

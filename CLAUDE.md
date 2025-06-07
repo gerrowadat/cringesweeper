@@ -131,8 +131,7 @@ Tests use table-driven patterns and may require environment setup for some crede
 
 CringeSweeper includes full Docker support for containerized deployments:
 
-- **`Dockerfile`**: Multi-stage build with Alpine Linux for minimal image size
-- **`docker-compose.yml`**: Complete deployment stack with optional monitoring
+- **`Dockerfile`**: Multi-stage build with Alpine Linux for minimal image size with version info
 - **`.dockerignore`**: Optimized build context
 - **`.env.example`**: Template for environment configuration
 
@@ -150,23 +149,19 @@ The `server` command is specifically designed for long-term containerized deploy
 ### Quick Start with Docker
 
 ```bash
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your credentials
+# Build with version information
+docker build --build-arg VERSION=0.0.1 --build-arg COMMIT=$(git rev-parse HEAD) --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) -t cringesweeper .
 
-# Start with monitoring stack
-docker-compose --profile monitoring up -d
-
-# Or just the server
-docker-compose up -d cringesweeper
+# Run server
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platform=bluesky --max-post-age=30d
 ```
 
-### Monitoring Integration
+### Version Management
 
-Optional monitoring stack includes:
-- **Prometheus**: Metrics collection on port 9090
-- **Grafana**: Visualization dashboard on port 3000
-- **Health checks**: Built-in container health monitoring
+CringeSweeper uses semantic versioning with git tags:
+- **Version info**: Available at `/` endpoint and in Prometheus metrics
+- **Build-time injection**: Version, commit, and build time embedded during Docker build
+- **Git tag integration**: Automatically detects version from git tags when available
 
 ## Development Guidelines
 
