@@ -26,8 +26,6 @@ step-by-step instructions and URLs for each platform's authentication process.
 Supports credential storage both as environment variables and in local config files.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Handle both --platform (legacy) and --platforms (new) flags
-		platform, _ := cmd.Flags().GetString("platform")
 		platformsStr, _ := cmd.Flags().GetString("platforms")
 		status, _ := cmd.Flags().GetBool("status")
 
@@ -41,16 +39,15 @@ Supports credential storage both as environment variables and in local config fi
 		var platforms []string
 		var err error
 		
-		if platformsStr != "" {
-			// Use --platforms flag (new behavior)
-			platforms, err = internal.ParsePlatforms(platformsStr)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			// Use --platform flag (legacy behavior)
-			platforms = []string{platform}
+		if platformsStr == "" {
+			fmt.Printf("Error: --platforms flag is required. Specify comma-separated platforms (bluesky,mastodon) or 'all'\n")
+			os.Exit(1)
+		}
+		
+		platforms, err = internal.ParsePlatforms(platformsStr)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Process each platform sequentially (auth is interactive)
@@ -357,7 +354,7 @@ func showPlatformStatus(platform string) {
 	finalCreds, err := internal.GetCredentialsForPlatform(platform)
 	if err != nil {
 		fmt.Printf("❌ No usable credentials available\n")
-		fmt.Printf("   Run 'cringesweeper auth --platform=%s' to set up authentication\n", platform)
+		fmt.Printf("   Run 'cringesweeper auth --platforms=%s' to set up authentication\n", platform)
 	} else {
 		fmt.Printf("🎯 Active credentials: %s\n", finalCreds.Username)
 	}
@@ -365,7 +362,6 @@ func showPlatformStatus(platform string) {
 
 func init() {
 	rootCmd.AddCommand(authCmd)
-	authCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform to authenticate with (bluesky, mastodon) - legacy flag")
 	authCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	authCmd.Flags().Bool("status", false, "Show credential status instead of setting up authentication")
 }

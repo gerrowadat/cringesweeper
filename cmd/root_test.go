@@ -110,19 +110,15 @@ func TestRootFlags(t *testing.T) {
 }
 
 func TestAuthCommandFlags(t *testing.T) {
-	t.Run("auth has platform flag", func(t *testing.T) {
-		flag := authCmd.Flags().Lookup("platform")
+	t.Run("auth has platforms flag", func(t *testing.T) {
+		flag := authCmd.Flags().Lookup("platforms")
 		if flag == nil {
-			t.Error("Auth command should have platform flag")
+			t.Error("Auth command should have platforms flag")
 			return
 		}
 
-		if flag.Shorthand != "p" {
-			t.Errorf("Expected platform flag shorthand 'p', got %q", flag.Shorthand)
-		}
-
-		if flag.DefValue != "bluesky" {
-			t.Errorf("Expected platform flag default 'bluesky', got %q", flag.DefValue)
+		if flag.DefValue != "" {
+			t.Errorf("Expected platforms flag default '', got %q", flag.DefValue)
 		}
 	})
 
@@ -140,19 +136,15 @@ func TestAuthCommandFlags(t *testing.T) {
 }
 
 func TestLsCommandFlags(t *testing.T) {
-	t.Run("ls has platform flag", func(t *testing.T) {
-		flag := lsCmd.Flags().Lookup("platform")
+	t.Run("ls has platforms flag", func(t *testing.T) {
+		flag := lsCmd.Flags().Lookup("platforms")
 		if flag == nil {
-			t.Error("Ls command should have platform flag")
+			t.Error("Ls command should have platforms flag")
 			return
 		}
 
-		if flag.Shorthand != "p" {
-			t.Errorf("Expected platform flag shorthand 'p', got %q", flag.Shorthand)
-		}
-
-		if flag.DefValue != "bluesky" {
-			t.Errorf("Expected platform flag default 'bluesky', got %q", flag.DefValue)
+		if flag.DefValue != "" {
+			t.Errorf("Expected platforms flag default '', got %q", flag.DefValue)
 		}
 	})
 }
@@ -164,7 +156,7 @@ func TestPruneCommandFlags(t *testing.T) {
 		shorthand    string
 		required     bool
 	}{
-		{"platform", true, "p", false},
+		{"platforms", false, "", false},
 		{"max-post-age", false, "", false},
 		{"before-date", false, "", false},
 		{"preserve-selflike", false, "", false},

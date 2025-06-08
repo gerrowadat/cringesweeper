@@ -106,8 +106,6 @@ All prune flags are supported for configuring the periodic pruning behavior.
 Use --prune-interval to control how often pruning runs (default: 1h).`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Handle both --platform (legacy) and --platforms (new) flags
-		platform, _ := cmd.Flags().GetString("platform")
 		platformsStr, _ := cmd.Flags().GetString("platforms")
 		port, _ := cmd.Flags().GetInt("port")
 		pruneIntervalStr, _ := cmd.Flags().GetString("prune-interval")
@@ -130,16 +128,15 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 		// Determine which platforms to use
 		var platforms []string
 		
-		if platformsStr != "" {
-			// Use --platforms flag (new behavior)
-			platforms, err = internal.ParsePlatforms(platformsStr)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			// Use --platform flag (legacy behavior)
-			platforms = []string{platform}
+		if platformsStr == "" {
+			fmt.Printf("Error: --platforms flag is required. Specify comma-separated platforms (bluesky,mastodon) or 'all'\n")
+			os.Exit(1)
+		}
+		
+		platforms, err = internal.ParsePlatforms(platformsStr)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Get username with fallback priority: argument > environment variables only (no saved credentials)
@@ -644,7 +641,6 @@ func init() {
 	serverCmd.Flags().String("prune-interval", "1h", "Time between prune runs (e.g., 30m, 1h, 2h)")
 	
 	// Inherit all prune flags
-	serverCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
 	serverCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	serverCmd.Flags().String("max-post-age", "", "Delete posts older than this (e.g., 30d, 1y, 24h)")
 	serverCmd.Flags().String("before-date", "", "Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)")

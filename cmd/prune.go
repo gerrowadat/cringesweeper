@@ -36,8 +36,6 @@ ALWAYS use --dry-run first to preview what would be processed. Actions are
 permanent and cannot be undone. Requires authentication for the target platform.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Handle both --platform (legacy) and --platforms (new) flags
-		platform, _ := cmd.Flags().GetString("platform")
 		platformsStr, _ := cmd.Flags().GetString("platforms")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		preserveSelfLike, _ := cmd.Flags().GetBool("preserve-selflike")
@@ -53,16 +51,15 @@ permanent and cannot be undone. Requires authentication for the target platform.
 		var platforms []string
 		var err error
 		
-		if platformsStr != "" {
-			// Use --platforms flag (new behavior)
-			platforms, err = internal.ParsePlatforms(platformsStr)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			// Use --platform flag (legacy behavior)
-			platforms = []string{platform}
+		if platformsStr == "" {
+			fmt.Printf("Error: --platforms flag is required. Specify comma-separated platforms (bluesky,mastodon) or 'all'\n")
+			os.Exit(1)
+		}
+		
+		platforms, err = internal.ParsePlatforms(platformsStr)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Get username with fallback priority: argument > saved credentials > environment
@@ -781,7 +778,6 @@ func truncateContent(content string, maxLen int) string {
 
 func init() {
 	rootCmd.AddCommand(pruneCmd)
-	pruneCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
 	pruneCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	pruneCmd.Flags().String("max-post-age", "", "Delete posts older than this (e.g., 30d, 1y, 24h)")
 	pruneCmd.Flags().String("before-date", "", "Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)")

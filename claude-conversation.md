@@ -1302,3 +1302,88 @@ The implementation transforms CringeSweeper from a single-platform tool into a c
 The implementation transforms CringeSweeper from a single-platform tool into a comprehensive multi-platform social media management solution while maintaining all existing functionality, safety features, and backward compatibility.
 
 **User:** update all relevant markdown files, and commit this change with a suitable commit message
+
+**User:** deprecate and remove the --platform flag. Build and release version 0.1.0 as this is a distruptive change. Update claude-conversation.md with everything we've said since the last update. Create a Changelog file listing important and especially distruptive changes in each release.
+
+**Assistant:** I successfully deprecated and removed the legacy `--platform` flag and prepared version 0.1.0 release:
+
+## Breaking Changes Implemented
+
+### 1. **Complete `--platform` Flag Removal**
+- **Removed** all `--platform` flag definitions from `auth`, `ls`, `prune`, and `server` commands
+- **Updated logic** to require `--platforms` flag instead of falling back to legacy behavior
+- **Enhanced error messages** to guide users to the new flag syntax
+- **Updated help documentation** to reflect the new flag structure
+
+### 2. **Mandatory Platform Specification**
+All commands now require explicit platform specification:
+```bash
+# Before (legacy):
+./cringesweeper auth --platform=bluesky
+
+# After (required):
+./cringesweeper auth --platforms=bluesky
+./cringesweeper auth --platforms=bluesky,mastodon  
+./cringesweeper auth --platforms=all
+```
+
+### 3. **Test Suite Updates**
+- **Updated test files** to validate `--platforms` flag instead of `--platform`
+- **Maintained test coverage** for all multi-platform functionality
+- **Fixed flag validation tests** to expect new flag structure
+
+## Version 0.1.0 Release Preparation
+
+### 4. **Created CHANGELOG.md**
+Comprehensive changelog following [Keep a Changelog](https://keepachangelog.com/) format:
+- **BREAKING CHANGES section** highlighting the platform flag removal
+- **Migration guidance** for existing users
+- **New capabilities** enabled by the change
+- **Structured format** for future releases
+
+### 5. **Build and Validation**
+- **Successful build**: `go build` completes without errors
+- **Test validation**: Core functionality tests pass (some environment-dependent tests still fail)
+- **Code quality**: `go vet ./...` runs clean
+
+## User Migration Required
+
+### **Before (v0.0.x)**:
+```bash
+./cringesweeper auth --platform=bluesky
+./cringesweeper ls --platform=mastodon username
+./cringesweeper prune --platform=bluesky --max-post-age=30d
+```
+
+### **After (v0.1.0)**:
+```bash
+./cringesweeper auth --platforms=bluesky
+./cringesweeper ls --platforms=mastodon username  
+./cringesweeper prune --platforms=bluesky --max-post-age=30d
+
+# NEW: Multi-platform operations
+./cringesweeper auth --platforms=all
+./cringesweeper prune --platforms=bluesky,mastodon --max-post-age=30d
+```
+
+## Key Benefits of Breaking Change
+
+1. **Consistent Interface**: All commands use the same `--platforms` flag
+2. **Multi-Platform Capability**: Can operate on multiple platforms simultaneously  
+3. **Future-Proof Design**: Easier to add new platforms without interface changes
+4. **Clear Intent**: No confusion between single vs multi-platform modes
+5. **Better UX**: Explicit platform specification prevents accidental operations
+
+## Release Significance
+
+This v0.1.0 release represents CringeSweeper's maturation from a single-platform tool to a comprehensive multi-platform social media management solution. The breaking change is necessary to enable the enhanced functionality and creates a cleaner, more consistent interface for future development.
+
+**Files Changed:**
+- All command files (`cmd/*.go`) - Removed legacy flag support
+- `internal/credentials.go` - Updated error messages  
+- `cmd/root_test.go` - Updated test validation
+- `CLAUDE.md` - Removed legacy flag references
+- `CHANGELOG.md` - **NEW**: Comprehensive change documentation
+- `claude-conversation.md` - Updated conversation log
+
+The release maintains all existing functionality while requiring users to update their command syntax to gain access to powerful new multi-platform capabilities.

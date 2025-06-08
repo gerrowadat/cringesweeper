@@ -128,7 +128,6 @@ All commands support multi-platform operations:
 
 All commands support:
 - `--platforms` flag for multi-platform operations (comma-separated list or "all")
-- `--platform` flag for single platform (LEGACY - use --platforms instead)
 - `--log-level` flag for debugging (debug, info, warn, error)
 
 ### Testing

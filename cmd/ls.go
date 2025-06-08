@@ -31,8 +31,6 @@ time periods.
 The username can be provided as an argument or via environment variables.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Handle both --platform (legacy) and --platforms (new) flags
-		platform, _ := cmd.Flags().GetString("platform")
 		platformsStr, _ := cmd.Flags().GetString("platforms")
 		continueUntilEnd, _ := cmd.Flags().GetBool("continue")
 		limitStr, _ := cmd.Flags().GetString("limit")
@@ -43,16 +41,15 @@ The username can be provided as an argument or via environment variables.`,
 		var platforms []string
 		var err error
 		
-		if platformsStr != "" {
-			// Use --platforms flag (new behavior)
-			platforms, err = internal.ParsePlatforms(platformsStr)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			// Use --platform flag (legacy behavior)
-			platforms = []string{platform}
+		if platformsStr == "" {
+			fmt.Printf("Error: --platforms flag is required. Specify comma-separated platforms (bluesky,mastodon) or 'all'\n")
+			os.Exit(1)
+		}
+		
+		platforms, err = internal.ParsePlatforms(platformsStr)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
 		}
 
 		// Get username with fallback priority: argument > saved credentials > environment
@@ -483,7 +480,6 @@ func displayPosts(posts []internal.Post, platform string) {
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
-	lsCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
 	lsCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	lsCmd.Flags().String("limit", "10", "Maximum number of posts to fetch per batch")
 	lsCmd.Flags().String("max-post-age", "", "Only show posts older than this (e.g., 30d, 1y, 24h)")

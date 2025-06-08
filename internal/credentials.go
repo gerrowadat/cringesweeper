@@ -24,7 +24,7 @@ func GetCredentialsForPlatform(platform string) (*Credentials, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no valid credentials found for platform %s. Run 'cringesweeper auth --platform=%s' to set up authentication", platform, platform)
+	return nil, fmt.Errorf("no valid credentials found for platform %s. Run 'cringesweeper auth --platforms=%s' to set up authentication", platform, platform)
 }
 
 // GetUsernameForPlatform gets username with fallback priority: argument > saved credentials > environment
@@ -61,7 +61,7 @@ func GetUsernameForPlatform(platform string, argUsername string) (string, error)
 		return username, nil
 	}
 
-	return "", fmt.Errorf("no username found. Please provide a username as an argument, run 'cringesweeper auth --platform=%s', or set %s_USER environment variable", platform, map[string]string{"bluesky": "BLUESKY", "mastodon": "MASTODON"}[platform])
+	return "", fmt.Errorf("no username found. Please provide a username as an argument, run 'cringesweeper auth --platforms=%s', or set %s_USER environment variable", platform, map[string]string{"bluesky": "BLUESKY", "mastodon": "MASTODON"}[platform])
 }
 
 // GetCredentialsForPlatformEnvOnly only loads credentials from environment variables (for server mode)
