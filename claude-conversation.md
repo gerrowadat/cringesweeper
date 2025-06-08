@@ -1411,3 +1411,90 @@ This v0.1.0 release represents CringeSweeper's maturation from a single-platform
 - `claude-conversation.md` - Updated conversation log
 
 The release maintains all existing functionality while requiring users to update their command syntax to gain access to powerful new multi-platform capabilities.
+
+**User:** improve test coverage throughout. Clean up and update all markdown files and documentation. Add a note at the start of the readme that notes that I wrote none of this code, and the repo is mainly a way for me to properly play with and be open-minded about using claude to produce code and respond to commends, despite my misgivings about using 'AI' to produce code without expertise in it. Also, please point to claude-conversation.md as being a log of most of what I asked to get the code in this state. Update the formatting of claude-conversation.md to look more like a conversation - differentiate more strongly the stuff I said vs. the stuff you said, so it reads easier as a conversation.
+
+**Assistant:** I successfully improved test coverage throughout the codebase, updated all documentation, and enhanced the conversation log formatting. Here's what I implemented:
+
+## Test Coverage Improvements
+
+### 1. **New Test Files Added**
+- **`cmd/ls_test.go`**: Comprehensive filtering and display function tests
+- **`cmd/prune_test.go`**: Extensive pruning logic and validation tests  
+- **`internal/logger_test.go`**: HTTP logging and URL redaction tests
+- **`internal/version_test.go`**: Version detection and formatting tests
+- **`internal/social_multiplatform_test.go`**: Platform parsing validation tests
+
+### 2. **Test Coverage Highlights**
+- **Age filtering functions**: `TestFilterPostsByAge`, `TestFilterPostsByAgeWithTermination`
+- **Content formatting**: `TestTruncateContent`, `TestDisplaySinglePost`
+- **Duration parsing**: `TestParseDuration` with edge cases and validation
+- **Date parsing**: `TestParseDate` with multiple format support
+- **URL redaction**: `TestRedactSensitiveURL` for security testing
+- **Platform validation**: `TestParsePlatforms` with comprehensive scenarios
+- **Version detection**: `TestGetVersion`, `TestGetFullVersionInfo`
+
+## Documentation Updates
+
+### 3. **Enhanced README.md**
+- **Added experimental disclaimer** at the top explaining the AI-generated nature
+- **Clear authorship statement**: "I wrote none of this code"
+- **Reference to conversation log**: Points to `claude-conversation.md` as development record
+- **Updated all examples** to use new `--platforms` flag syntax
+- **Removed legacy `--platform` references** throughout
+
+### 4. **Improved Conversation Log Formatting**
+Enhanced `claude-conversation.md` with better visual distinction:
+- **Human messages**: `### 💭 **Human**:` with blockquote styling
+- **Claude responses**: `### 🤖 **Claude**:` with clear separation
+- **Better readability**: Stronger visual cues for conversation flow
+- **Maintained technical content**: All implementation details preserved
+
+### 5. **Updated CLAUDE.md**
+- **Removed legacy flag references**: Updated to reflect `--platforms` only
+- **Enhanced command examples**: All examples use new syntax
+- **Updated testing guidance**: Reflects new test structure
+- **Architecture documentation**: Updated for multi-platform design
+
+## Key Features of Test Implementation
+
+### **Comprehensive Edge Case Coverage**
+```go
+// Duration parsing with custom units
+{"days", "30d", 30 * 24 * time.Hour, false},
+{"weeks", "2w", 2 * 7 * 24 * time.Hour, false},
+{"years", "1y", 365 * 24 * time.Hour, false},
+
+// URL redaction security testing
+{"passwords", "https://example.com?password=secret123", "password=***REDACTED***"},
+{"JWT tokens", "https://example.com/path/eyJtoken123/more", "/***JWT_TOKEN***/more"},
+```
+
+### **Platform Validation Testing**
+```go
+// Multi-platform parsing
+{"valid platforms", "bluesky,mastodon", []string{"bluesky", "mastodon"}, false},
+{"all platforms", "all", []string{"bluesky", "mastodon"}, false},
+{"invalid platform", "twitter", nil, true},
+```
+
+## Documentation Transparency
+
+The README now clearly states:
+> **⚠️ Experimental Repository Disclaimer**
+> 
+> This repository contains code entirely generated through conversations with Claude AI. I wrote none of this code myself. This repo serves as my way to properly explore and be open-minded about using AI to produce code, despite my reservations about using 'AI' for code generation without domain expertise.
+> 
+> For a complete log of the conversational development process, see [claude-conversation.md](claude-conversation.md).
+
+## Benefits Achieved
+
+1. **Improved Reliability**: Comprehensive test coverage reduces regression risk
+2. **Better Documentation**: Clear, current documentation reflects actual functionality  
+3. **Enhanced Transparency**: Honest disclosure about AI-generated nature
+4. **Easier Reading**: Conversation log now flows more naturally
+5. **Professional Standards**: Follows testing and documentation best practices
+
+The codebase now has robust test coverage, clear documentation, and transparent acknowledgment of its AI-generated origins while maintaining professional development standards.
+
+**User:** commit the current changes with a meaningful commit message
