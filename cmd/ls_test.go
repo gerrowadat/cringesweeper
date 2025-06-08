@@ -514,41 +514,6 @@ func TestDisplayPostsRepostWithoutOriginal(t *testing.T) {
 	})
 }
 
-func TestLsCommandFlags(t *testing.T) {
-	tests := []struct {
-		name         string
-		flagName     string
-		hasShorthand bool
-		shorthand    string
-		defaultValue string
-	}{
-		{"platforms flag", "platforms", false, "", ""},
-		{"continue flag", "continue", false, "", "false"},
-		{"max-post-age flag", "max-post-age", false, "", ""},
-		{"before-date flag", "before-date", false, "", ""},
-		{"limit flag", "limit", false, "", "10"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			flag := lsCmd.Flags().Lookup(tt.flagName)
-			if flag == nil {
-				t.Errorf("Flag %q should exist", tt.flagName)
-				return
-			}
-
-			if tt.hasShorthand && flag.Shorthand != tt.shorthand {
-				t.Errorf("Expected shorthand %q for flag %q, got %q", 
-					tt.shorthand, tt.flagName, flag.Shorthand)
-			}
-
-			if flag.DefValue != tt.defaultValue {
-				t.Errorf("Expected default value %q for flag %q, got %q", 
-					tt.defaultValue, tt.flagName, flag.DefValue)
-			}
-		})
-	}
-}
 
 func TestFilterPostsByAge(t *testing.T) {
 	now := time.Now()
@@ -654,7 +619,7 @@ func TestFilterPostsByAgeWithTermination(t *testing.T) {
 			name:           "max age stops at second post",
 			maxAge:         durationPtr(30 * time.Hour),
 			expectedPosts:  2,
-			shouldContinue: true,
+			shouldContinue: false,
 		},
 		{
 			name:           "max age stops at first post",

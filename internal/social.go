@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -121,6 +122,8 @@ func GetAllPlatformNames() []string {
 	for platform := range SupportedPlatforms {
 		platforms = append(platforms, platform)
 	}
+	// Sort for consistent ordering
+	sort.Strings(platforms)
 	return platforms
 }
 
@@ -140,7 +143,7 @@ func ParsePlatforms(platformsStr string) ([]string, error) {
 	validPlatforms := make([]string, 0, len(platformList))
 	
 	for _, platform := range platformList {
-		platform = strings.TrimSpace(platform)
+		platform = strings.TrimSpace(strings.ToLower(platform))
 		if platform == "" {
 			continue
 		}

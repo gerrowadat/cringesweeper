@@ -83,8 +83,8 @@ func WithHTTP(method, url string) *zerolog.Logger {
 
 // RedactSensitiveURL redacts sensitive information from URLs for logging
 func RedactSensitiveURL(url string) string {
-	// Redact Authorization tokens and passwords in query params
-	re := regexp.MustCompile(`([?&])(password|token|access_token|refresh_token|bearer|authorization)=([^&]+)`)
+	// Redact Authorization tokens and passwords in query params (case-insensitive)
+	re := regexp.MustCompile(`(?i)([?&])(password|token|access_token|refresh_token|bearer|authorization)=([^&#]+)`)
 	url = re.ReplaceAllString(url, "${1}${2}=***REDACTED***")
 	
 	// Redact any potential tokens in path segments (like JWT tokens)
@@ -92,7 +92,7 @@ func RedactSensitiveURL(url string) string {
 	url = re.ReplaceAllString(url, "/***JWT_TOKEN***")
 	
 	// Redact anything that looks like an app password (typically long alphanumeric strings)
-	re = regexp.MustCompile(`([?&])(app[_-]?password|apppassword)=([^&]+)`)
+	re = regexp.MustCompile(`(?i)([?&])(app[_-]?password|apppassword)=([^&#]+)`)
 	url = re.ReplaceAllString(url, "${1}${2}=***REDACTED***")
 	
 	return url

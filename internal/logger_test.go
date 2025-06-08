@@ -1,9 +1,7 @@
 package internal
 
 import (
-	"strings"
 	"testing"
-	"net/url"
 )
 
 func TestRedactSensitiveURL(t *testing.T) {
