@@ -513,3 +513,237 @@ func TestDisplayPostsRepostWithoutOriginal(t *testing.T) {
 		displayPosts(posts, "TestPlatform")
 	})
 }
+
+func TestLsCommandFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		flagName     string
+		hasShorthand bool
+		shorthand    string
+		defaultValue string
+	}{
+		{"platforms flag", "platforms", false, "", ""},
+		{"continue flag", "continue", false, "", "false"},
+		{"max-post-age flag", "max-post-age", false, "", ""},
+		{"before-date flag", "before-date", false, "", ""},
+		{"limit flag", "limit", false, "", "10"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flag := lsCmd.Flags().Lookup(tt.flagName)
+			if flag == nil {
+				t.Errorf("Flag %q should exist", tt.flagName)
+				return
+			}
+
+			if tt.hasShorthand && flag.Shorthand != tt.shorthand {
+				t.Errorf("Expected shorthand %q for flag %q, got %q", 
+					tt.shorthand, tt.flagName, flag.Shorthand)
+			}
+
+			if flag.DefValue != tt.defaultValue {
+				t.Errorf("Expected default value %q for flag %q, got %q", 
+					tt.defaultValue, tt.flagName, flag.DefValue)
+			}
+		})
+	}
+}
+
+func TestFilterPostsByAge(t *testing.T) {
+	now := time.Now()
+	posts := []internal.Post{
+		{
+			ID:        "1",
+			Content:   "Recent post",
+			CreatedAt: now.Add(-1 * time.Hour),
+		},
+		{
+			ID:        "2", 
+			Content:   "Old post",
+			CreatedAt: now.Add(-25 * time.Hour),
+		},
+		{
+			ID:        "3",
+			Content:   "Very old post", 
+			CreatedAt: now.Add(-48 * time.Hour),
+		},
+	}
+
+	tests := []struct {
+		name       string
+		maxAge     *time.Duration
+		beforeDate *time.Time
+		expected   int
+	}{
+		{
+			name:     "no filters",
+			expected: 3,
+		},
+		{
+			name:     "max age 2 hours",
+			maxAge:   durationPtr(2 * time.Hour),
+			expected: 1,
+		},
+		{
+			name:     "max age 30 hours",
+			maxAge:   durationPtr(30 * time.Hour),
+			expected: 2,
+		},
+		{
+			name:       "before date 1 hour ago",
+			beforeDate: timePtr(now.Add(-1 * time.Hour)),
+			expected:   2,
+		},
+		{
+			name:       "before date 26 hours ago",
+			beforeDate: timePtr(now.Add(-26 * time.Hour)),
+			expected:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := filterPostsByAge(posts, tt.maxAge, tt.beforeDate)
+			if len(filtered) != tt.expected {
+				t.Errorf("Expected %d posts, got %d", tt.expected, len(filtered))
+			}
+		})
+	}
+}
+
+func TestFilterPostsByAgeWithTermination(t *testing.T) {
+	now := time.Now()
+	posts := []internal.Post{
+		{
+			ID:        "1",
+			Content:   "Recent post",
+			CreatedAt: now.Add(-1 * time.Hour),
+		},
+		{
+			ID:        "2",
+			Content:   "Old post", 
+			CreatedAt: now.Add(-25 * time.Hour),
+		},
+		{
+			ID:        "3",
+			Content:   "Very old post",
+			CreatedAt: now.Add(-48 * time.Hour),
+		},
+	}
+
+	tests := []struct {
+		name             string
+		maxAge           *time.Duration
+		beforeDate       *time.Time
+		expectedPosts    int
+		shouldContinue   bool
+	}{
+		{
+			name:           "no filters",
+			expectedPosts:  3,
+			shouldContinue: true,
+		},
+		{
+			name:           "max age allows all posts",
+			maxAge:         durationPtr(50 * time.Hour),
+			expectedPosts:  3,
+			shouldContinue: true,
+		},
+		{
+			name:           "max age stops at second post",
+			maxAge:         durationPtr(30 * time.Hour),
+			expectedPosts:  2,
+			shouldContinue: true,
+		},
+		{
+			name:           "max age stops at first post",
+			maxAge:         durationPtr(2 * time.Hour),
+			expectedPosts:  1,
+			shouldContinue: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered, shouldContinue := filterPostsByAgeWithTermination(posts, tt.maxAge, tt.beforeDate)
+			
+			if len(filtered) != tt.expectedPosts {
+				t.Errorf("Expected %d posts, got %d", tt.expectedPosts, len(filtered))
+			}
+			
+			if shouldContinue != tt.shouldContinue {
+				t.Errorf("Expected shouldContinue=%v, got %v", tt.shouldContinue, shouldContinue)
+			}
+		})
+	}
+}
+
+func TestDisplaySinglePost(t *testing.T) {
+	// Test that displaySinglePost doesn't panic with various post types
+	posts := []internal.Post{
+		{
+			ID:        "1",
+			Type:      internal.PostTypeOriginal,
+			Content:   "Original post",
+			Handle:    "user",
+			Author:    "User Name",
+			CreatedAt: time.Now(),
+			URL:       "https://example.com/1",
+		},
+		{
+			ID:        "2", 
+			Type:      internal.PostTypeRepost,
+			Content:   "Reposted content",
+			Handle:    "user",
+			CreatedAt: time.Now(),
+			OriginalHandle: "original_user",
+			OriginalAuthor: "Original User",
+			OriginalPost: &internal.Post{
+				Content: "Original post content",
+			},
+		},
+		{
+			ID:        "3",
+			Type:      internal.PostTypeReply,
+			Content:   "Reply content",
+			Handle:    "user", 
+			CreatedAt: time.Now(),
+		},
+		{
+			ID:        "4",
+			Type:      internal.PostTypeLike,
+			Content:   "Liked content",
+			Handle:    "user",
+			CreatedAt: time.Now(),
+		},
+		{
+			ID:        "5",
+			Type:      internal.PostTypeQuote,
+			Content:   "Quote content",
+			Handle:    "user",
+			CreatedAt: time.Now(),
+		},
+	}
+
+	for i, post := range posts {
+		t.Run(string(post.Type), func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("displaySinglePost panicked with post type %s: %v", post.Type, r)
+				}
+			}()
+			
+			displaySinglePost(post, i+1)
+		})
+	}
+}
+
+// Helper functions
+func durationPtr(d time.Duration) *time.Duration {
+	return &d
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
+}

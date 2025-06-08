@@ -1,5 +1,13 @@
 # CringeSweeper 🧹
 
+> **⚠️ Experimental Repository Disclaimer**
+> 
+> **I wrote none of this code.** This repository serves as an experimental exploration of using Claude AI to produce functional software through conversational programming. Despite my usual skepticism about AI-generated code (especially without deep expertise in the domain), I wanted to approach this with an open mind and see what's possible.
+>
+> The entire development process is documented in [`claude-conversation.md`](claude-conversation.md), which contains a log of nearly everything I asked Claude to implement to get the code to this state. This serves both as a transparency record and as a case study in AI-assisted development.
+>
+> Use this software at your own discretion and always test thoroughly before running on important data.
+
 A command-line tool for managing your social media presence across multiple platforms. View, analyze, and selectively delete posts from Bluesky, Mastodon, and other social networks.
 
 ## Features
@@ -60,7 +68,7 @@ make docker-run-env
 
 1. **Set up authentication** for your preferred platform:
    ```bash
-   ./cringesweeper auth --platform=bluesky
+   ./cringesweeper auth --platforms=bluesky
    ```
 
 2. **View your recent posts** (uses saved credentials automatically):
@@ -105,8 +113,7 @@ Display recent posts from a user's timeline with optional filtering and continuo
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
-- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
+- `--platforms string`: **Required** - Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--limit string`: Maximum number of posts to fetch per batch (default "10")
 - `--max-post-age string`: Only show posts older than this (e.g., 30d, 1y, 24h)
 - `--before-date string`: Only show posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
@@ -115,14 +122,14 @@ Display recent posts from a user's timeline with optional filtering and continuo
 
 **Examples:**
 ```bash
-# List recent posts using saved credentials (after running auth command)
-./cringesweeper ls
+# List recent posts from Bluesky using saved credentials
+./cringesweeper ls --platforms=bluesky
 
 # List posts from a specific Bluesky user
-./cringesweeper ls user.bsky.social
+./cringesweeper ls --platforms=bluesky user.bsky.social
 
 # List posts from a Mastodon user
-./cringesweeper ls --platform=mastodon user@mastodon.social
+./cringesweeper ls --platforms=mastodon user@mastodon.social
 
 # MULTI-PLATFORM: List posts from all platforms
 ./cringesweeper ls --platforms=all
@@ -131,10 +138,10 @@ Display recent posts from a user's timeline with optional filtering and continuo
 ./cringesweeper ls --platforms=bluesky,mastodon
 
 # Show posts older than 30 days with streaming output
-./cringesweeper ls --max-post-age=30d
+./cringesweeper ls --platforms=bluesky --max-post-age=30d
 
 # Continuously search through entire timeline for old posts
-./cringesweeper ls --continue --before-date=2023-01-01
+./cringesweeper ls --platforms=bluesky --continue --before-date=2023-01-01
 
 # MULTI-PLATFORM: Search all platforms for old posts
 ./cringesweeper ls --platforms=all --continue --before-date=2023-01-01
@@ -176,8 +183,7 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
-- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
+- `--platforms string`: **Required** - Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--max-post-age string`: Delete posts older than this (e.g., 30d, 1y, 24h)
 - `--before-date string`: Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
 - `--preserve-selflike`: Don't delete user's own posts that they have liked
@@ -237,16 +243,16 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 ./cringesweeper prune --platforms=all --continue --max-post-age=1y --dry-run
 
 # Mastodon pruning with multiple criteria
-./cringesweeper prune --platform=mastodon --max-post-age=6m --preserve-selflike
+./cringesweeper prune --platforms=mastodon --max-post-age=6m --preserve-selflike
 
 # Bluesky pruning (uses 1s default delay for faster processing)
-./cringesweeper prune --platform=bluesky --max-post-age=30d --dry-run
+./cringesweeper prune --platforms=bluesky --max-post-age=30d --dry-run
 
 # Mastodon pruning (uses 60s default delay for API compliance)
-./cringesweeper prune --platform=mastodon --max-post-age=30d --dry-run
+./cringesweeper prune --platforms=mastodon --max-post-age=30d --dry-run
 
 # Custom rate limiting to override platform defaults
-./cringesweeper prune --platform=bluesky --max-post-age=30d --rate-limit-delay=500ms --dry-run
+./cringesweeper prune --platforms=bluesky --max-post-age=30d --rate-limit-delay=500ms --dry-run
 ```
 
 **Continuous Processing (`--continue` flag):**
@@ -279,18 +285,17 @@ Guide you through setting up authentication credentials for social media platfor
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform to authenticate with (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
 - `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
-- `--status`: Show credential status for all platforms (ignores --platform flag)
+- `--status`: Show credential status for all platforms
 - `-h, --help`: Help for auth command
 
 **Examples:**
 ```bash
 # Setup Bluesky authentication
-./cringesweeper auth --platform=bluesky
+./cringesweeper auth --platforms=bluesky
 
 # Setup Mastodon authentication
-./cringesweeper auth --platform=mastodon
+./cringesweeper auth --platforms=mastodon
 
 # MULTI-PLATFORM: Setup authentication for all platforms
 ./cringesweeper auth --platforms=all
@@ -298,7 +303,7 @@ Guide you through setting up authentication credentials for social media platfor
 # MULTI-PLATFORM: Setup authentication for specific platforms
 ./cringesweeper auth --platforms=bluesky,mastodon
 
-# Check credential status for all platforms (--platform flag is ignored with --status)
+# Check credential status for all platforms
 ./cringesweeper auth --status
 ```
 
@@ -313,8 +318,7 @@ Run CringeSweeper as a persistent service with periodic pruning and Prometheus m
 **Server-specific Flags:**
 - `-P, --port int`: HTTP server port (default 8080)
 - `--prune-interval string`: Time between prune runs (e.g., 30m, 1h, 2h) (default "1h")
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
-- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
+- `--platforms string`: **Required** - Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - All `prune` command flags are supported for periodic operations
 
 **Note:** Multi-platform server support is currently in development. The server will use the first specified platform only.
@@ -335,14 +339,14 @@ Run CringeSweeper as a persistent service with periodic pruning and Prometheus m
 ```bash
 # Run server with 30-day post retention
 BLUESKY_USERNAME=user.bsky.social BLUESKY_APP_PASSWORD=secret \
-./cringesweeper server --platform=bluesky --max-post-age=30d --preserve-pinned --prune-interval=1h
+./cringesweeper server --platforms=bluesky --max-post-age=30d --preserve-pinned --prune-interval=1h
 
 # Run with Mastodon, delete posts before specific date
 MASTODON_USERNAME=user MASTODON_ACCESS_TOKEN=token MASTODON_INSTANCE=https://mastodon.social \
-./cringesweeper server --platform=mastodon --before-date=2024-01-01 --prune-interval=2h
+./cringesweeper server --platforms=mastodon --before-date=2024-01-01 --prune-interval=2h
 
 # Test mode - show what would be deleted without actually deleting
-./cringesweeper server --platform=bluesky --max-post-age=7d --dry-run --prune-interval=30m
+./cringesweeper server --platforms=bluesky --max-post-age=7d --dry-run --prune-interval=30m
 ```
 
 **Docker Deployment:**
@@ -355,10 +359,10 @@ docker run -d \
   -p 8080:8080 \
   -e BLUESKY_USERNAME=user.bsky.social \
   -e BLUESKY_APP_PASSWORD=your-app-password \
-  cringesweeper server --platform=bluesky --max-post-age=30d --preserve-pinned
+  cringesweeper server --platforms=bluesky --max-post-age=30d --preserve-pinned
 
 # Or using env file
-docker run -d -p 8080:8080 --env-file .env cringesweeper server --platform=bluesky --max-post-age=30d
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platforms=bluesky --max-post-age=30d
 ```
 
 **Access:**
@@ -371,7 +375,7 @@ docker run -d -p 8080:8080 --env-file .env cringesweeper server --platform=blues
 
 Bluesky uses app passwords for API access:
 
-1. Run: `./cringesweeper auth --platform=bluesky`
+1. Run: `./cringesweeper auth --platforms=bluesky`
 2. Visit the URL provided in the output: https://bsky.app/settings/app-passwords
 3. Create an app password named "CringeSweeper"
 4. Enter your username and app password when prompted
@@ -386,7 +390,7 @@ export BLUESKY_PASSWORD="your-app-password"
 
 Mastodon uses OAuth2 access tokens:
 
-1. Run: `./cringesweeper auth --platform=mastodon`
+1. Run: `./cringesweeper auth --platforms=mastodon`
 2. Visit the URL provided in the output for your instance (e.g., https://mastodon.social/settings/applications)
 3. Click "New Application" and fill in the details:
    - Application name: "CringeSweeper"
@@ -434,8 +438,8 @@ The auth command can automatically save credentials to config files for persiste
 ### Initial Setup and Status Check
 ```bash
 # Set up authentication for your platforms
-./cringesweeper auth --platform=bluesky
-./cringesweeper auth --platform=mastodon
+./cringesweeper auth --platforms=bluesky
+./cringesweeper auth --platforms=mastodon
 
 # Check all your saved credentials
 ./cringesweeper auth --status
@@ -468,15 +472,15 @@ The auth command can automatically save credentials to config files for persiste
 ./cringesweeper ls --platforms=all --continue --max-post-age=1y
 
 # Legacy: View recent posts from multiple platforms (using saved credentials)
-./cringesweeper ls --platform=bluesky
-./cringesweeper ls --platform=mastodon
+./cringesweeper ls --platforms=bluesky
+./cringesweeper ls --platforms=mastodon
 
 # MULTI-PLATFORM: Prune old posts from all platforms
 ./cringesweeper prune --platforms=all --max-post-age=6m --dry-run
 
 # Legacy: Prune old posts from both platforms separately
-./cringesweeper prune --platform=bluesky --max-post-age=6m --dry-run
-./cringesweeper prune --platform=mastodon --max-post-age=6m --dry-run
+./cringesweeper prune --platforms=bluesky --max-post-age=6m --dry-run
+./cringesweeper prune --platforms=mastodon --max-post-age=6m --dry-run
 
 # MULTI-PLATFORM: Comprehensive cleanup across all platforms
 ./cringesweeper prune --platforms=all --continue --max-post-age=6m --dry-run

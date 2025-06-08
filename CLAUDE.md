@@ -105,7 +105,6 @@ All commands support multi-platform operations:
 
 - **`auth`**: Platform authentication setup and credential management
   - `--platforms`: Set up authentication for multiple platforms (bluesky,mastodon or "all")
-  - Maintains backward compatibility with `--platform` flag
 - **`ls`**: List recent posts from user timelines with filtering and streaming
   - `--platforms`: List posts from multiple platforms simultaneously 
   - `--continue`: Search entire timeline instead of just recent posts
@@ -167,7 +166,7 @@ The `server` command is specifically designed for long-term containerized deploy
 docker build --build-arg VERSION=0.0.1 --build-arg COMMIT=$(git rev-parse HEAD) --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) -t cringesweeper .
 
 # Run server
-docker run -d -p 8080:8080 --env-file .env cringesweeper server --platform=bluesky --max-post-age=30d
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platforms=bluesky --max-post-age=30d
 ```
 
 ### Version Management
