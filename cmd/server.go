@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -84,6 +85,10 @@ var serverCmd = &cobra.Command{
 	Short: "Run as a long-term service with periodic pruning and metrics",
 	Long: `Run CringeSweeper as a server that periodically prunes posts and serves metrics.
 
+Use --platforms to monitor multiple platforms (e.g., --platforms=bluesky,mastodon
+or --platforms=all). Note: Multi-platform server support is currently in development;
+the server will use the first specified platform only.
+
 This mode runs continuously and:
 - Periodically executes prune operations based on the configured interval
 - Serves HTTP endpoints for health checks and Prometheus metrics
@@ -101,7 +106,9 @@ All prune flags are supported for configuring the periodic pruning behavior.
 Use --prune-interval to control how often pruning runs (default: 1h).`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		// Handle both --platform (legacy) and --platforms (new) flags
 		platform, _ := cmd.Flags().GetString("platform")
+		platformsStr, _ := cmd.Flags().GetString("platforms")
 		port, _ := cmd.Flags().GetInt("port")
 		pruneIntervalStr, _ := cmd.Flags().GetString("prune-interval")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -120,26 +127,156 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 			os.Exit(1)
 		}
 
+		// Determine which platforms to use
+		var platforms []string
+		
+		if platformsStr != "" {
+			// Use --platforms flag (new behavior)
+			platforms, err = internal.ParsePlatforms(platformsStr)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Use --platform flag (legacy behavior)
+			platforms = []string{platform}
+		}
+
 		// Get username with fallback priority: argument > environment variables only (no saved credentials)
 		argUsername := ""
 		if len(args) > 0 {
 			argUsername = args[0]
 		}
 
-		username, err := internal.GetUsernameForPlatformEnvOnly(platform, argUsername)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			fmt.Printf("In server mode, credentials must be provided via environment variables only.\n")
-			os.Exit(1)
+		// Validate credentials for all platforms
+		type PlatformConfig struct {
+			name     string
+			username string
+			client   internal.SocialClient
+		}
+		
+		var platformConfigs []PlatformConfig
+		for _, platformName := range platforms {
+			username, err := internal.GetUsernameForPlatformEnvOnly(platformName, argUsername)
+			if err != nil {
+				fmt.Printf("Error for %s: %v\n", platformName, err)
+				fmt.Printf("In server mode, credentials must be provided via environment variables only.\n")
+				os.Exit(1)
+			}
+
+			client, exists := internal.GetClient(platformName)
+			if !exists {
+				fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: %s\n", 
+					platformName, strings.Join(internal.GetAllPlatformNames(), ", "))
+				os.Exit(1)
+			}
+			
+			platformConfigs = append(platformConfigs, PlatformConfig{
+				name:     platformName,
+				username: username,
+				client:   client,
+			})
 		}
 
-		client, exists := internal.GetClient(platform)
-		if !exists {
-			fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: bluesky, mastodon\n", platform)
-			os.Exit(1)
+		// Create platform-specific configurations
+		for i, config := range platformConfigs {
+			// Parse rate limit delay - use platform-appropriate defaults
+			var rateLimitDelay time.Duration
+			if rateLimitDelayStr != "" {
+				delay, err := parseDuration(rateLimitDelayStr)
+				if err != nil {
+					fmt.Printf("Error parsing rate-limit-delay: %v\n", err)
+					os.Exit(1)
+				}
+				rateLimitDelay = delay
+			} else {
+				// Set platform-appropriate defaults
+				switch config.name {
+				case "mastodon":
+					rateLimitDelay = 60 * time.Second
+				case "bluesky":
+					rateLimitDelay = 1 * time.Second
+				default:
+					rateLimitDelay = 5 * time.Second
+				}
+			}
+
+			// Parse options for this platform
+			options := internal.PruneOptions{
+				PreserveSelfLike: preserveSelfLike,
+				PreservePinned:   preservePinned,
+				UnlikePosts:      unlikePosts,
+				UnshareReposts:   unshareReposts,
+				DryRun:           dryRun,
+				RateLimitDelay:   rateLimitDelay,
+			}
+
+			// Parse max age
+			if maxAgeStr != "" {
+				maxAge, err := parseDuration(maxAgeStr)
+				if err != nil {
+					fmt.Printf("Error parsing max-post-age: %v\n", err)
+					os.Exit(1)
+				}
+				options.MaxAge = &maxAge
+			}
+
+			// Parse before date
+			if beforeDateStr != "" {
+				beforeDate, err := parseDate(beforeDateStr)
+				if err != nil {
+					fmt.Printf("Error parsing before-date: %v\n", err)
+					os.Exit(1)
+				}
+				options.BeforeDate = &beforeDate
+			}
+
+			// Validate that at least one criteria is specified
+			if options.MaxAge == nil && options.BeforeDate == nil {
+				fmt.Printf("Error for %s: Must specify either --max-post-age or --before-date\n", config.name)
+				os.Exit(1)
+			}
+
+			// Verify credentials work before starting server
+			if err := verifyCredentials(config.client, config.name); err != nil {
+				fmt.Printf("Error: Failed to verify credentials for %s: %v\n", config.name, err)
+				fmt.Printf("In server mode, credentials must be provided via environment variables.\n")
+				os.Exit(1)
+			}
+
+			// Update platform config with options
+			platformConfigs[i] = PlatformConfig{
+				name:     config.name,
+				username: config.username,
+				client:   config.client,
+			}
+
+			log.Info().
+				Str("platform", config.name).
+				Str("username", config.username).
+				Dur("prune_interval", pruneInterval).
+				Int("port", port).
+				Bool("dry_run", dryRun).
+				Msg("Configured platform for CringeSweeper server")
 		}
 
-		// Parse rate limit delay - use platform-appropriate defaults
+		log.Info().
+			Int("platforms", len(platformConfigs)).
+			Dur("prune_interval", pruneInterval).
+			Int("port", port).
+			Bool("dry_run", dryRun).
+			Msg("Starting CringeSweeper multi-platform server")
+
+		// For now, use the first platform (backward compatibility)
+		// TODO: Implement true multi-platform server support
+		if len(platformConfigs) > 1 {
+			fmt.Printf("Warning: Multi-platform server support is still in development.\n")
+			fmt.Printf("Currently using first platform (%s) only.\n", platformConfigs[0].name)
+		}
+		
+		firstConfig := platformConfigs[0]
+		
+		// Create options for the first platform
 		var rateLimitDelay time.Duration
 		if rateLimitDelayStr != "" {
 			delay, err := parseDuration(rateLimitDelayStr)
@@ -149,8 +286,7 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 			}
 			rateLimitDelay = delay
 		} else {
-			// Set platform-appropriate defaults
-			switch platform {
+			switch firstConfig.name {
 			case "mastodon":
 				rateLimitDelay = 60 * time.Second
 			case "bluesky":
@@ -159,8 +295,7 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 				rateLimitDelay = 5 * time.Second
 			}
 		}
-
-		// Parse options
+		
 		options := internal.PruneOptions{
 			PreserveSelfLike: preserveSelfLike,
 			PreservePinned:   preservePinned,
@@ -169,8 +304,7 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 			DryRun:           dryRun,
 			RateLimitDelay:   rateLimitDelay,
 		}
-
-		// Parse max age
+		
 		if maxAgeStr != "" {
 			maxAge, err := parseDuration(maxAgeStr)
 			if err != nil {
@@ -179,8 +313,7 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 			}
 			options.MaxAge = &maxAge
 		}
-
-		// Parse before date
+		
 		if beforeDateStr != "" {
 			beforeDate, err := parseDate(beforeDateStr)
 			if err != nil {
@@ -189,30 +322,9 @@ Use --prune-interval to control how often pruning runs (default: 1h).`,
 			}
 			options.BeforeDate = &beforeDate
 		}
-
-		// Validate that at least one criteria is specified
-		if options.MaxAge == nil && options.BeforeDate == nil {
-			fmt.Println("Error: Must specify either --max-post-age or --before-date")
-			os.Exit(1)
-		}
-
-		// Verify credentials work before starting server
-		if err := verifyCredentials(client, platform); err != nil {
-			fmt.Printf("Error: Failed to verify credentials: %v\n", err)
-			fmt.Printf("In server mode, credentials must be provided via environment variables.\n")
-			os.Exit(1)
-		}
-
-		log.Info().
-			Str("platform", platform).
-			Str("username", username).
-			Dur("prune_interval", pruneInterval).
-			Int("port", port).
-			Bool("dry_run", dryRun).
-			Msg("Starting CringeSweeper server")
-
-		// Start the server
-		startServer(client, username, options, platform, pruneInterval, port)
+		
+		// Start the server (use existing single-platform implementation)
+		startServer(firstConfig.client, firstConfig.username, options, firstConfig.name, pruneInterval, port)
 	},
 }
 
@@ -532,7 +644,8 @@ func init() {
 	serverCmd.Flags().String("prune-interval", "1h", "Time between prune runs (e.g., 30m, 1h, 2h)")
 	
 	// Inherit all prune flags
-	serverCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon)")
+	serverCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
+	serverCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	serverCmd.Flags().String("max-post-age", "", "Delete posts older than this (e.g., 30d, 1y, 24h)")
 	serverCmd.Flags().String("before-date", "", "Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)")
 	serverCmd.Flags().Bool("preserve-selflike", false, "Don't delete user's own posts that they have liked")

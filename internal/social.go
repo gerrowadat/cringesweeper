@@ -115,6 +115,62 @@ func GetClient(platform string) (SocialClient, bool) {
 	return constructor(), true
 }
 
+// GetAllPlatformNames returns a slice of all supported platform names
+func GetAllPlatformNames() []string {
+	platforms := make([]string, 0, len(SupportedPlatforms))
+	for platform := range SupportedPlatforms {
+		platforms = append(platforms, platform)
+	}
+	return platforms
+}
+
+// ParsePlatforms parses a comma-separated list of platforms and validates them
+func ParsePlatforms(platformsStr string) ([]string, error) {
+	if platformsStr == "" {
+		return nil, fmt.Errorf("platforms cannot be empty")
+	}
+
+	// Handle special case: "all" means all supported platforms
+	if platformsStr == "all" {
+		return GetAllPlatformNames(), nil
+	}
+
+	// Split by comma and trim whitespace
+	platformList := strings.Split(platformsStr, ",")
+	validPlatforms := make([]string, 0, len(platformList))
+	
+	for _, platform := range platformList {
+		platform = strings.TrimSpace(platform)
+		if platform == "" {
+			continue
+		}
+		
+		// Validate platform exists
+		if _, exists := SupportedPlatforms[platform]; !exists {
+			return nil, fmt.Errorf("unsupported platform '%s'. Supported platforms: %s", 
+				platform, strings.Join(GetAllPlatformNames(), ", "))
+		}
+		
+		// Avoid duplicates
+		found := false
+		for _, existing := range validPlatforms {
+			if existing == platform {
+				found = true
+				break
+			}
+		}
+		if !found {
+			validPlatforms = append(validPlatforms, platform)
+		}
+	}
+	
+	if len(validPlatforms) == 0 {
+		return nil, fmt.Errorf("no valid platforms specified")
+	}
+	
+	return validPlatforms, nil
+}
+
 // HTTPClientConfig holds configuration for HTTP clients
 type HTTPClientConfig struct {
 	Timeout time.Duration

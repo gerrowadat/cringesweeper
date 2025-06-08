@@ -16,6 +16,10 @@ var pruneCmd = &cobra.Command{
 	Short: "Delete posts based on age, date, and preservation rules",
 	Long: `Delete posts, unlike posts, and unshare reposts from your social media accounts based on configurable criteria.
 
+Use --platforms to operate on multiple platforms simultaneously (e.g., --platforms=bluesky,mastodon
+or --platforms=all). When multiple platforms are specified, operations are performed
+on each platform sequentially with clear progress indicators.
+
 What gets processed:
 - Original posts you created: Deleted permanently
 - Posts you've reposted: Removes your repost (unrepost)
@@ -32,7 +36,9 @@ ALWAYS use --dry-run first to preview what would be processed. Actions are
 permanent and cannot be undone. Requires authentication for the target platform.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		// Handle both --platform (legacy) and --platforms (new) flags
 		platform, _ := cmd.Flags().GetString("platform")
+		platformsStr, _ := cmd.Flags().GetString("platforms")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		preserveSelfLike, _ := cmd.Flags().GetBool("preserve-selflike")
 		preservePinned, _ := cmd.Flags().GetBool("preserve-pinned")
@@ -43,95 +49,329 @@ permanent and cannot be undone. Requires authentication for the target platform.
 		beforeDateStr, _ := cmd.Flags().GetString("before-date")
 		rateLimitDelayStr, _ := cmd.Flags().GetString("rate-limit-delay")
 
+		// Determine which platforms to use
+		var platforms []string
+		var err error
+		
+		if platformsStr != "" {
+			// Use --platforms flag (new behavior)
+			platforms, err = internal.ParsePlatforms(platformsStr)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Use --platform flag (legacy behavior)
+			platforms = []string{platform}
+		}
+
 		// Get username with fallback priority: argument > saved credentials > environment
 		argUsername := ""
 		if len(args) > 0 {
 			argUsername = args[0]
 		}
 
-		username, err := internal.GetUsernameForPlatform(platform, argUsername)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
+		// Track overall results across all platforms
+		totalResults := &internal.PruneResult{
+			PostsToDelete:  []internal.Post{},
+			PostsToUnlike:  []internal.Post{},
+			PostsToUnshare: []internal.Post{},
+			PostsPreserved: []internal.Post{},
+			DeletedCount:   0,
+			UnlikedCount:   0,
+			UnsharedCount:  0,
+			PreservedCount: 0,
+			ErrorsCount:    0,
+			Errors:         []string{},
 		}
 
-		client, exists := internal.GetClient(platform)
-		if !exists {
-			fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: bluesky, mastodon\n", platform)
-			os.Exit(1)
-		}
-
-		// Parse rate limit delay - use platform-appropriate defaults
-		var rateLimitDelay time.Duration
-		if rateLimitDelayStr != "" {
-			delay, err := parseDuration(rateLimitDelayStr)
-			if err != nil {
-				fmt.Printf("Error parsing rate-limit-delay: %v\n", err)
-				os.Exit(1)
+		// Process each platform
+		for i, platformName := range platforms {
+			if len(platforms) > 1 {
+				fmt.Printf("\n=== PRUNING %s ===\n", strings.ToUpper(platformName))
 			}
-			rateLimitDelay = delay
-		} else {
-			// Set platform-appropriate defaults
-			switch platform {
-			case "mastodon":
-				rateLimitDelay = 60 * time.Second // Conservative for Mastodon's 30 DELETEs per 30 minutes
-			case "bluesky":
-				rateLimitDelay = 1 * time.Second // More permissive for Bluesky's higher limits
-			default:
-				rateLimitDelay = 5 * time.Second // Safe default for unknown platforms
-			}
-		}
 
-		// Parse options
-		options := internal.PruneOptions{
-			PreserveSelfLike: preserveSelfLike,
-			PreservePinned:   preservePinned,
-			UnlikePosts:      unlikePosts,
-			UnshareReposts:   unshareReposts,
-			DryRun:           dryRun,
-			RateLimitDelay:   rateLimitDelay,
-		}
-
-		// Parse max age
-		if maxAgeStr != "" {
-			maxAge, err := parseDuration(maxAgeStr)
+			username, err := internal.GetUsernameForPlatform(platformName, argUsername)
 			if err != nil {
-				fmt.Printf("Error parsing max-post-age: %v\n", err)
-				os.Exit(1)
-			}
-			options.MaxAge = &maxAge
-		}
-
-		// Parse before date
-		if beforeDateStr != "" {
-			beforeDate, err := parseDate(beforeDateStr)
-			if err != nil {
-				fmt.Printf("Error parsing before-date: %v\n", err)
-				os.Exit(1)
-			}
-			options.BeforeDate = &beforeDate
-		}
-
-		// Validate that at least one criteria is specified
-		if options.MaxAge == nil && options.BeforeDate == nil {
-			fmt.Println("Error: Must specify either --max-post-age or --before-date")
-			os.Exit(1)
-		}
-
-		// Perform pruning
-		if continueUntilEnd {
-			performContinuousPruning(client, username, options)
-		} else {
-			result, err := client.PrunePosts(username, options)
-			if err != nil {
-				fmt.Printf("Error pruning posts from %s: %v\n", client.GetPlatformName(), err)
+				fmt.Printf("Error for %s: %v\n", platformName, err)
+				if len(platforms) > 1 {
+					totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: %v", platformName, err))
+					continue // Skip this platform but continue with others
+				}
 				os.Exit(1)
 			}
 
-			// Display results
+			client, exists := internal.GetClient(platformName)
+			if !exists {
+				errorMsg := fmt.Sprintf("Unsupported platform '%s'. Supported platforms: %s", 
+					platformName, strings.Join(internal.GetAllPlatformNames(), ", "))
+				fmt.Printf("Error: %s\n", errorMsg)
+				if len(platforms) > 1 {
+					totalResults.Errors = append(totalResults.Errors, errorMsg)
+					continue // Skip this platform but continue with others
+				}
+				os.Exit(1)
+			}
+
+			// Parse rate limit delay - use platform-appropriate defaults
+			var rateLimitDelay time.Duration
+			if rateLimitDelayStr != "" {
+				delay, err := parseDuration(rateLimitDelayStr)
+				if err != nil {
+					fmt.Printf("Error parsing rate-limit-delay for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: rate-limit-delay parse error: %v", platformName, err))
+						continue
+					}
+					os.Exit(1)
+				}
+				rateLimitDelay = delay
+			} else {
+				// Set platform-appropriate defaults
+				switch platformName {
+				case "mastodon":
+					rateLimitDelay = 60 * time.Second // Conservative for Mastodon's 30 DELETEs per 30 minutes
+				case "bluesky":
+					rateLimitDelay = 1 * time.Second // More permissive for Bluesky's higher limits
+				default:
+					rateLimitDelay = 5 * time.Second // Safe default for unknown platforms
+				}
+			}
+
+			// Parse options
+			options := internal.PruneOptions{
+				PreserveSelfLike: preserveSelfLike,
+				PreservePinned:   preservePinned,
+				UnlikePosts:      unlikePosts,
+				UnshareReposts:   unshareReposts,
+				DryRun:           dryRun,
+				RateLimitDelay:   rateLimitDelay,
+			}
+
+			// Parse max age
+			if maxAgeStr != "" {
+				maxAge, err := parseDuration(maxAgeStr)
+				if err != nil {
+					fmt.Printf("Error parsing max-post-age for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: max-post-age parse error: %v", platformName, err))
+						continue
+					}
+					os.Exit(1)
+				}
+				options.MaxAge = &maxAge
+			}
+
+			// Parse before date
+			if beforeDateStr != "" {
+				beforeDate, err := parseDate(beforeDateStr)
+				if err != nil {
+					fmt.Printf("Error parsing before-date for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: before-date parse error: %v", platformName, err))
+						continue
+					}
+					os.Exit(1)
+				}
+				options.BeforeDate = &beforeDate
+			}
+
+			// Validate that at least one criteria is specified
+			if options.MaxAge == nil && options.BeforeDate == nil {
+				fmt.Printf("Error for %s: Must specify either --max-post-age or --before-date\n", platformName)
+				if len(platforms) > 1 {
+					totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: no age criteria specified", platformName))
+					continue
+				}
+				os.Exit(1)
+			}
+
+			// Perform pruning for this platform
+			var result *internal.PruneResult
+			if continueUntilEnd {
+				result = performContinuousPruningWithResult(client, username, options)
+			} else {
+				var err error
+				result, err = client.PrunePosts(username, options)
+				if err != nil {
+					fmt.Printf("Error pruning posts from %s: %v\n", client.GetPlatformName(), err)
+					if len(platforms) > 1 {
+						totalResults.Errors = append(totalResults.Errors, fmt.Sprintf("%s: %v", platformName, err))
+						continue
+					}
+					os.Exit(1)
+				}
+			}
+
+			// Display results for this platform
 			displayPruneResults(result, client.GetPlatformName(), dryRun)
+
+			// Add to total results
+			totalResults.PostsToDelete = append(totalResults.PostsToDelete, result.PostsToDelete...)
+			totalResults.PostsToUnlike = append(totalResults.PostsToUnlike, result.PostsToUnlike...)
+			totalResults.PostsToUnshare = append(totalResults.PostsToUnshare, result.PostsToUnshare...)
+			totalResults.PostsPreserved = append(totalResults.PostsPreserved, result.PostsPreserved...)
+			totalResults.DeletedCount += result.DeletedCount
+			totalResults.UnlikedCount += result.UnlikedCount
+			totalResults.UnsharedCount += result.UnsharedCount
+			totalResults.PreservedCount += result.PreservedCount
+			totalResults.ErrorsCount += result.ErrorsCount
+			totalResults.Errors = append(totalResults.Errors, result.Errors...)
+
+			// Add spacing between platforms when processing multiple
+			if len(platforms) > 1 && i < len(platforms)-1 {
+				fmt.Println() // Extra newline between platforms
+			}
+		}
+
+		// Show combined results if multiple platforms were processed
+		if len(platforms) > 1 {
+			fmt.Printf("\n=== COMBINED RESULTS ===\n")
+			displayPruneResults(totalResults, "All Platforms", dryRun)
 		}
 	},
+}
+
+func performContinuousPruningWithResult(client internal.SocialClient, username string, options internal.PruneOptions) *internal.PruneResult {
+	platform := client.GetPlatformName()
+	totalDeleted := 0
+	totalUnliked := 0
+	totalUnshared := 0
+	totalPreserved := 0
+	totalErrors := 0
+	var allErrors []string
+	round := 1
+	cursor := ""      // Start with empty cursor for pagination
+	batchLimit := 100 // Fetch more posts per batch for pruning
+
+	fmt.Printf("Starting continuous pruning on %s (will continue until no more posts match criteria)...\n", platform)
+	if options.DryRun {
+		fmt.Println("DRY RUN MODE: No actual actions will be performed")
+	}
+
+	for {
+		fmt.Printf("Round %d: Fetching posts...\n", round)
+		
+		// Use paginated fetching to avoid infinite loops
+		posts, nextCursor, err := client.FetchUserPostsPaginated(username, batchLimit, cursor)
+		if err != nil {
+			fmt.Printf("Error in round %d: %v\n", round, err)
+			fmt.Printf("Stopping continuous pruning. Total processed so far:\n")
+			allErrors = append(allErrors, fmt.Sprintf("Round %d: %v", round, err))
+			break
+		}
+
+		// Check if we have reached the end (no more posts or same cursor)
+		if len(posts) == 0 {
+			fmt.Printf("Round %d: No more posts found. Pruning complete!\n", round)
+			break
+		}
+
+		if nextCursor == "" || nextCursor == cursor {
+			fmt.Printf("Round %d: Reached end of timeline. Pruning complete!\n", round)
+			break
+		}
+
+		// Create a mock PruneResult to hold posts for this batch and process them
+		result := &internal.PruneResult{
+			PostsToDelete:  []internal.Post{},
+			PostsToUnlike:  []internal.Post{},
+			PostsToUnshare: []internal.Post{},
+			PostsPreserved: []internal.Post{},
+			Errors:         []string{},
+		}
+
+		// Filter posts by age criteria and process them
+		matchingPosts := 0
+		for _, post := range posts {
+			// Apply age filtering (inline logic)
+			now := time.Now()
+			matchesAge := true
+			
+			if options.MaxAge != nil {
+				if now.Sub(post.CreatedAt) <= *options.MaxAge {
+					matchesAge = false
+				}
+			}
+			
+			if options.BeforeDate != nil {
+				if !post.CreatedAt.Before(*options.BeforeDate) {
+					matchesAge = false
+				}
+			}
+			
+			if !matchesAge {
+				continue
+			}
+			matchingPosts++
+
+			// Check if post should be preserved (inline logic)
+			shouldPreserve := false
+			if options.PreservePinned && post.IsPinned {
+				shouldPreserve = true
+			}
+			if options.PreserveSelfLike && post.IsLikedByUser {
+				shouldPreserve = true
+			}
+
+			// Process each matching post
+			if shouldPreserve {
+				result.PostsPreserved = append(result.PostsPreserved, post)
+				totalPreserved++
+				if options.DryRun {
+					fmt.Printf("🛡️ PRESERVED: %s\n", truncateContent(post.Content, 50))
+				}
+			} else {
+				// Determine action based on post type and options
+				if post.Type == internal.PostTypeLike && options.UnlikePosts {
+					result.PostsToUnlike = append(result.PostsToUnlike, post)
+					totalUnliked++
+					if options.DryRun {
+						fmt.Printf("👎 UNLIKE: %s\n", truncateContent(post.Content, 50))
+					}
+				} else if post.Type == internal.PostTypeRepost && options.UnshareReposts {
+					result.PostsToUnshare = append(result.PostsToUnshare, post)
+					totalUnshared++
+					if options.DryRun {
+						fmt.Printf("🔄 UNSHARE: %s\n", truncateContent(post.Content, 50))
+					}
+				} else {
+					result.PostsToDelete = append(result.PostsToDelete, post)
+					totalDeleted++
+					if options.DryRun {
+						fmt.Printf("🗑️ DELETE: %s\n", truncateContent(post.Content, 50))
+					}
+				}
+			}
+		}
+
+		fmt.Printf("Round %d completed: %d posts matched criteria\n", round, matchingPosts)
+		
+		// If no posts matched criteria this round, continue to next batch
+		if matchingPosts == 0 {
+			fmt.Printf("Round %d: No posts matched criteria, continuing...\n", round)
+		}
+
+		cursor = nextCursor
+		round++
+
+		// Small delay between rounds to be respectful to APIs
+		time.Sleep(2 * time.Second)
+	}
+
+	// Return final results
+	return &internal.PruneResult{
+		PostsToDelete:  []internal.Post{}, // Posts already processed in dry-run mode
+		PostsToUnlike:  []internal.Post{},
+		PostsToUnshare: []internal.Post{},
+		PostsPreserved: []internal.Post{},
+		DeletedCount:   totalDeleted,
+		UnlikedCount:   totalUnliked,
+		UnsharedCount:  totalUnshared,
+		PreservedCount: totalPreserved,
+		ErrorsCount:    totalErrors,
+		Errors:         allErrors,
+	}
 }
 
 func performContinuousPruning(client internal.SocialClient, username string, options internal.PruneOptions) {
@@ -541,7 +781,8 @@ func truncateContent(content string, maxLen int) string {
 
 func init() {
 	rootCmd.AddCommand(pruneCmd)
-	pruneCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon)")
+	pruneCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
+	pruneCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	pruneCmd.Flags().String("max-post-age", "", "Delete posts older than this (e.g., 30d, 1y, 24h)")
 	pruneCmd.Flags().String("before-date", "", "Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)")
 	pruneCmd.Flags().Bool("preserve-selflike", false, "Don't delete user's own posts that they have liked")

@@ -30,13 +30,13 @@ go vet ./... # Validate code quality
 
 ## Architecture Overview
 
-CringeSweeper is a CLI tool for managing social media posts across multiple platforms (Bluesky, Mastodon). 
+CringeSweeper is a CLI tool for managing social media posts across multiple platforms (Bluesky, Mastodon) with comprehensive multi-platform support.
 
 ### Core Architecture
 
 The codebase follows a clean separation of concerns:
 
-- **`cmd/`** - Cobra CLI commands (auth, ls, prune, root)
+- **`cmd/`** - Cobra CLI commands (auth, ls, prune, server, root) with multi-platform support
 - **`internal/`** - Core business logic and platform implementations
 - **`cringesweeper.go`** - Main entry point
 
@@ -47,6 +47,12 @@ The codebase follows a clean separation of concerns:
    - Implemented by BlueskyClient and MastodonClient
    - Supports post fetching, pruning, pagination, and authentication requirements
    - Key methods: `FetchUserPosts()`, `FetchUserPostsPaginated()`, `PrunePosts()`
+
+2. **Multi-Platform Management** (`internal/social.go`):
+   - `ParsePlatforms()`: Parses comma-separated platform lists and validates them
+   - `GetAllPlatformNames()`: Returns all supported platform names
+   - Support for "all" keyword to operate on all platforms
+   - Platform validation with helpful error messages
 
 2. **Post Structure** (`internal/social.go`):
    - Unified post representation across platforms
@@ -95,17 +101,25 @@ To add support for a new social platform:
 
 ### Command Structure
 
+All commands support multi-platform operations:
+
 - **`auth`**: Platform authentication setup and credential management
+  - `--platforms`: Set up authentication for multiple platforms (bluesky,mastodon or "all")
+  - Maintains backward compatibility with `--platform` flag
 - **`ls`**: List recent posts from user timelines with filtering and streaming
+  - `--platforms`: List posts from multiple platforms simultaneously 
   - `--continue`: Search entire timeline instead of just recent posts
   - `--max-post-age`: Filter posts by age (e.g., "30d", "1y")
   - `--before-date`: Filter posts before specific date
   - `--limit`: Control batch size for pagination
 - **`prune`**: Delete/unlike/unshare posts based on criteria with continuous processing
+  - `--platforms`: Prune posts across multiple platforms with combined results
   - `--continue`: Process entire timeline instead of just recent posts
   - `--dry-run`: Preview actions without performing them
   - All age filtering options from `ls` command
 - **`server`**: Long-term service mode with periodic pruning and metrics
+  - `--platforms`: Monitor multiple platforms (currently uses first platform only)
+  - Full multi-platform server support planned for future releases
   - `--port`: HTTP server port (default: 8080)
   - `--prune-interval`: Time between prune runs (default: 1h)
   - All prune flags supported for periodic operations

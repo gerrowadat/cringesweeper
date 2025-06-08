@@ -15,6 +15,10 @@ var authCmd = &cobra.Command{
 	Short: "Setup authentication for social media platforms",
 	Long: `Interactive setup of authentication credentials for social media platforms.
 
+Use --platforms to set up authentication for multiple platforms (e.g., --platforms=bluesky,mastodon
+or --platforms=all). When multiple platforms are specified, authentication setup
+is performed sequentially for each platform with clear progress indicators.
+
 Guides you through obtaining the necessary API keys, app passwords, and access 
 tokens required for authenticated operations like post deletion. Provides 
 step-by-step instructions and URLs for each platform's authentication process.
@@ -22,7 +26,9 @@ step-by-step instructions and URLs for each platform's authentication process.
 Supports credential storage both as environment variables and in local config files.`,
 	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Handle both --platform (legacy) and --platforms (new) flags
 		platform, _ := cmd.Flags().GetString("platform")
+		platformsStr, _ := cmd.Flags().GetString("platforms")
 		status, _ := cmd.Flags().GetBool("status")
 
 		// Handle status flag - always show all platforms when --status is used
@@ -31,30 +37,75 @@ Supports credential storage both as environment variables and in local config fi
 			return
 		}
 
-		client, exists := internal.GetClient(platform)
-		if !exists {
-			fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: bluesky, mastodon\n", platform)
-			os.Exit(1)
-		}
-
-		fmt.Printf("Setting up authentication for %s\n\n", client.GetPlatformName())
-
+		// Determine which platforms to use
+		var platforms []string
 		var err error
-		switch platform {
-		case "bluesky":
-			err = setupBlueskyAuth()
-		case "mastodon":
-			err = setupMastodonAuth()
-		default:
-			err = fmt.Errorf("authentication not implemented for platform: %s", platform)
+		
+		if platformsStr != "" {
+			// Use --platforms flag (new behavior)
+			platforms, err = internal.ParsePlatforms(platformsStr)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Use --platform flag (legacy behavior)
+			platforms = []string{platform}
 		}
 
-		if err != nil {
-			fmt.Printf("Error setting up authentication: %v\n", err)
-			os.Exit(1)
+		// Process each platform sequentially (auth is interactive)
+		successCount := 0
+		for i, platformName := range platforms {
+			if len(platforms) > 1 {
+				fmt.Printf("\n=== SETTING UP %s ===\n", strings.ToUpper(platformName))
+			}
+
+			client, exists := internal.GetClient(platformName)
+			if !exists {
+				fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: %s\n", 
+					platformName, strings.Join(internal.GetAllPlatformNames(), ", "))
+				if len(platforms) > 1 {
+					fmt.Printf("Skipping %s and continuing with other platforms...\n", platformName)
+					continue
+				}
+				os.Exit(1)
+			}
+
+			fmt.Printf("Setting up authentication for %s\n\n", client.GetPlatformName())
+
+			var authErr error
+			switch platformName {
+			case "bluesky":
+				authErr = setupBlueskyAuth()
+			case "mastodon":
+				authErr = setupMastodonAuth()
+			default:
+				authErr = fmt.Errorf("authentication not implemented for platform: %s", platformName)
+			}
+
+			if authErr != nil {
+				fmt.Printf("Error setting up authentication for %s: %v\n", platformName, authErr)
+				if len(platforms) > 1 {
+					fmt.Printf("Skipping %s and continuing with other platforms...\n", platformName)
+					continue
+				}
+				os.Exit(1)
+			}
+
+			fmt.Printf("\n✅ Authentication setup complete for %s!\n", client.GetPlatformName())
+			successCount++
+
+			// Add spacing between platforms when processing multiple
+			if len(platforms) > 1 && i < len(platforms)-1 {
+				fmt.Println() // Extra newline between platforms
+			}
 		}
 
-		fmt.Printf("\n✅ Authentication setup complete for %s!\n", client.GetPlatformName())
+		// Summary message
+		if len(platforms) > 1 {
+			fmt.Printf("\n=== AUTHENTICATION SUMMARY ===\n")
+			fmt.Printf("Successfully set up authentication for %d out of %d platforms.\n", successCount, len(platforms))
+		}
 		fmt.Println("You can now use commands that require authentication.")
 		fmt.Println()
 		fmt.Println("💡 Tip: Use 'cringesweeper auth --status' to view your saved credentials.")
@@ -314,6 +365,7 @@ func showPlatformStatus(platform string) {
 
 func init() {
 	rootCmd.AddCommand(authCmd)
-	authCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform to authenticate with (bluesky, mastodon, all)")
+	authCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform to authenticate with (bluesky, mastodon) - legacy flag")
+	authCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	authCmd.Flags().Bool("status", false, "Show credential status instead of setting up authentication")
 }

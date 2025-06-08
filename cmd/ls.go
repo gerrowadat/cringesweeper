@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gerrowadat/cringesweeper/internal"
@@ -18,6 +19,10 @@ var lsCmd = &cobra.Command{
 Supports multiple platforms including Bluesky and Mastodon. Shows post content,
 timestamps, author information, and post types (original, repost, reply, etc.).
 
+Use --platforms to specify multiple platforms (e.g., --platforms=bluesky,mastodon
+or --platforms=all). When multiple platforms are specified, results are shown
+grouped by platform with clear headers.
+
 By default, shows recent posts (typically 10 most recent). Use --continue to
 keep searching further back in time until no more posts are found. Use age
 filters like --max-post-age or --before-date to limit results to specific
@@ -26,11 +31,29 @@ time periods.
 The username can be provided as an argument or via environment variables.`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		// Handle both --platform (legacy) and --platforms (new) flags
 		platform, _ := cmd.Flags().GetString("platform")
+		platformsStr, _ := cmd.Flags().GetString("platforms")
 		continueUntilEnd, _ := cmd.Flags().GetBool("continue")
 		limitStr, _ := cmd.Flags().GetString("limit")
 		maxAgeStr, _ := cmd.Flags().GetString("max-post-age")
 		beforeDateStr, _ := cmd.Flags().GetString("before-date")
+
+		// Determine which platforms to use
+		var platforms []string
+		var err error
+		
+		if platformsStr != "" {
+			// Use --platforms flag (new behavior)
+			platforms, err = internal.ParsePlatforms(platformsStr)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Use --platform flag (legacy behavior)
+			platforms = []string{platform}
+		}
 
 		// Get username with fallback priority: argument > saved credentials > environment
 		argUsername := ""
@@ -38,60 +61,91 @@ The username can be provided as an argument or via environment variables.`,
 			argUsername = args[0]
 		}
 
-		username, err := internal.GetUsernameForPlatform(platform, argUsername)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
-		}
+		// Process each platform
+		for i, platformName := range platforms {
+			if len(platforms) > 1 {
+				fmt.Printf("\n=== %s ===\n", strings.ToUpper(platformName))
+			}
 
-		client, exists := internal.GetClient(platform)
-		if !exists {
-			fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: bluesky, mastodon\n", platform)
-			os.Exit(1)
-		}
-
-		// Parse limit
-		limit := 10 // default
-		if limitStr != "" {
-			parsedLimit, err := strconv.Atoi(limitStr)
+			username, err := internal.GetUsernameForPlatform(platformName, argUsername)
 			if err != nil {
-				fmt.Printf("Error parsing limit: %v\n", err)
+				fmt.Printf("Error for %s: %v\n", platformName, err)
+				if len(platforms) > 1 {
+					continue // Skip this platform but continue with others
+				}
 				os.Exit(1)
 			}
-			if parsedLimit <= 0 {
-				fmt.Printf("Error: limit must be a positive number\n")
+
+			client, exists := internal.GetClient(platformName)
+			if !exists {
+				fmt.Printf("Error: Unsupported platform '%s'. Supported platforms: %s\n", 
+					platformName, strings.Join(internal.GetAllPlatformNames(), ", "))
+				if len(platforms) > 1 {
+					continue // Skip this platform but continue with others
+				}
 				os.Exit(1)
 			}
-			limit = parsedLimit
-		}
 
-		// Parse age filters
-		var maxAge *time.Duration
-		var beforeDate *time.Time
-
-		if maxAgeStr != "" {
-			duration, err := parseDuration(maxAgeStr)
-			if err != nil {
-				fmt.Printf("Error parsing max-post-age: %v\n", err)
-				os.Exit(1)
+			// Parse limit
+			limit := 10 // default
+			if limitStr != "" {
+				parsedLimit, err := strconv.Atoi(limitStr)
+				if err != nil {
+					fmt.Printf("Error parsing limit for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						continue
+					}
+					os.Exit(1)
+				}
+				if parsedLimit <= 0 {
+					fmt.Printf("Error: limit must be a positive number\n")
+					if len(platforms) > 1 {
+						continue
+					}
+					os.Exit(1)
+				}
+				limit = parsedLimit
 			}
-			maxAge = &duration
-		}
 
-		if beforeDateStr != "" {
-			date, err := parseDate(beforeDateStr)
-			if err != nil {
-				fmt.Printf("Error parsing before-date: %v\n", err)
-				os.Exit(1)
+			// Parse age filters
+			var maxAge *time.Duration
+			var beforeDate *time.Time
+
+			if maxAgeStr != "" {
+				duration, err := parseDuration(maxAgeStr)
+				if err != nil {
+					fmt.Printf("Error parsing max-post-age for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						continue
+					}
+					os.Exit(1)
+				}
+				maxAge = &duration
 			}
-			beforeDate = &date
-		}
 
-		// Perform listing
-		if continueUntilEnd {
-			performContinuousListing(client, username, limit, maxAge, beforeDate)
-		} else {
-			performSingleListing(client, username, limit, maxAge, beforeDate)
+			if beforeDateStr != "" {
+				date, err := parseDate(beforeDateStr)
+				if err != nil {
+					fmt.Printf("Error parsing before-date for %s: %v\n", platformName, err)
+					if len(platforms) > 1 {
+						continue
+					}
+					os.Exit(1)
+				}
+				beforeDate = &date
+			}
+
+			// Perform listing
+			if continueUntilEnd {
+				performContinuousListing(client, username, limit, maxAge, beforeDate)
+			} else {
+				performSingleListing(client, username, limit, maxAge, beforeDate)
+			}
+
+			// Add spacing between platforms when processing multiple
+			if len(platforms) > 1 && i < len(platforms)-1 {
+				fmt.Println() // Extra newline between platforms
+			}
 		}
 	},
 }
@@ -429,7 +483,8 @@ func displayPosts(posts []internal.Post, platform string) {
 
 func init() {
 	rootCmd.AddCommand(lsCmd)
-	lsCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon)")
+	lsCmd.Flags().StringP("platform", "p", "bluesky", "Social media platform (bluesky, mastodon) - legacy flag")
+	lsCmd.Flags().String("platforms", "", "Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms")
 	lsCmd.Flags().String("limit", "10", "Maximum number of posts to fetch per batch")
 	lsCmd.Flags().String("max-post-age", "", "Only show posts older than this (e.g., 30d, 1y, 24h)")
 	lsCmd.Flags().String("before-date", "", "Only show posts created before this date (YYYY-MM-DD or MM/DD/YYYY)")

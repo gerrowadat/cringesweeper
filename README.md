@@ -4,14 +4,15 @@ A command-line tool for managing your social media presence across multiple plat
 
 ## Features
 
-- **Multi-platform support**: Works with Bluesky and Mastodon (more platforms coming soon)
+- **Multi-platform operations**: Use `--platforms=all` to operate on Bluesky and Mastodon simultaneously
+- **Cross-platform management**: List, prune, and authenticate across multiple platforms in a single command
 - **Post viewing**: List and browse your recent posts across platforms with streaming output
 - **Intelligent pruning**: Delete, unlike, or unshare posts based on age, date, and smart criteria
 - **Continuous processing**: Process entire post history with `--continue` flag using proper pagination
 - **Streaming output**: See results immediately as posts are found and processed
 - **Safety first**: Dry-run mode shows what would be deleted before actually deleting
 - **Preserve important posts**: Keep pinned posts and self-liked content
-- **Cross-platform authentication**: Guided setup for API keys and tokens
+- **Cross-platform authentication**: Guided setup for API keys and tokens across multiple platforms
 - **Post type detection**: Distinguishes between original posts, reposts, replies, and quotes
 - **Comprehensive logging**: Debug-level HTTP logging with sensitive data redaction
 - **Server mode**: Long-term containerized deployment with Prometheus metrics
@@ -97,14 +98,15 @@ All commands support these global flags:
 
 ### `ls` - List Recent Posts
 
-Display recent posts from a user's timeline with optional filtering and continuous searching.
+Display recent posts from a user's timeline with optional filtering and continuous searching. Supports multiple platforms for comprehensive social media management.
 
 ```bash
 ./cringesweeper ls [username] [flags]
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) (default "bluesky")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--limit string`: Maximum number of posts to fetch per batch (default "10")
 - `--max-post-age string`: Only show posts older than this (e.g., 30d, 1y, 24h)
 - `--before-date string`: Only show posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
@@ -122,11 +124,20 @@ Display recent posts from a user's timeline with optional filtering and continuo
 # List posts from a Mastodon user
 ./cringesweeper ls --platform=mastodon user@mastodon.social
 
+# MULTI-PLATFORM: List posts from all platforms
+./cringesweeper ls --platforms=all
+
+# MULTI-PLATFORM: List posts from specific platforms
+./cringesweeper ls --platforms=bluesky,mastodon
+
 # Show posts older than 30 days with streaming output
 ./cringesweeper ls --max-post-age=30d
 
 # Continuously search through entire timeline for old posts
 ./cringesweeper ls --continue --before-date=2023-01-01
+
+# MULTI-PLATFORM: Search all platforms for old posts
+./cringesweeper ls --platforms=all --continue --before-date=2023-01-01
 
 # Search with custom batch size for faster processing
 ./cringesweeper ls --continue --limit=50 --max-post-age=1y
@@ -155,7 +166,7 @@ CringeSweeper automatically finds your username using this priority order:
 
 ### `prune` - Delete, Unlike, or Unshare Posts by Criteria
 
-Delete, unlike, or unshare posts from your timeline based on age, date, and preservation rules.
+Delete, unlike, or unshare posts from your timeline based on age, date, and preservation rules. Supports multiple platforms for comprehensive social media cleanup.
 
 Alternative actions include unliking posts or unsharing reposts instead of deleting them,
 providing gentler cleanup options. Supports continuous processing to handle entire post histories.
@@ -165,7 +176,8 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) (default "bluesky")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--max-post-age string`: Delete posts older than this (e.g., 30d, 1y, 24h)
 - `--before-date string`: Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
 - `--preserve-selflike`: Don't delete user's own posts that they have liked
@@ -199,6 +211,12 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 # Delete posts older than 1 year, preserve pinned and self-liked
 ./cringesweeper prune --max-post-age=1y --preserve-pinned --preserve-selflike
 
+# MULTI-PLATFORM: Prune posts from all platforms
+./cringesweeper prune --platforms=all --max-post-age=30d --dry-run
+
+# MULTI-PLATFORM: Prune posts from specific platforms
+./cringesweeper prune --platforms=bluesky,mastodon --max-post-age=30d --dry-run
+
 # Unlike posts instead of deleting them
 ./cringesweeper prune --max-post-age=90d --unlike-posts --dry-run
 
@@ -214,6 +232,9 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 # CONTINUOUS PROCESSING - Process entire post history (NEW FEATURE)
 ./cringesweeper prune --continue --max-post-age=1y --dry-run
 ./cringesweeper prune --continue --before-date="2023-01-01" --preserve-pinned --dry-run
+
+# MULTI-PLATFORM CONTINUOUS - Process all platforms continuously
+./cringesweeper prune --platforms=all --continue --max-post-age=1y --dry-run
 
 # Mastodon pruning with multiple criteria
 ./cringesweeper prune --platform=mastodon --max-post-age=6m --preserve-selflike
@@ -251,14 +272,15 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 
 ### `auth` - Setup Authentication
 
-Guide you through setting up authentication credentials for social media platforms.
+Guide you through setting up authentication credentials for social media platforms. Supports multiple platforms for streamlined setup.
 
 ```bash
 ./cringesweeper auth [flags]
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform to authenticate with (bluesky, mastodon, all) (default "bluesky")
+- `-p, --platform string`: Social media platform to authenticate with (bluesky, mastodon) - legacy flag (default "bluesky")
+- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--status`: Show credential status for all platforms (ignores --platform flag)
 - `-h, --help`: Help for auth command
 
@@ -269,6 +291,12 @@ Guide you through setting up authentication credentials for social media platfor
 
 # Setup Mastodon authentication
 ./cringesweeper auth --platform=mastodon
+
+# MULTI-PLATFORM: Setup authentication for all platforms
+./cringesweeper auth --platforms=all
+
+# MULTI-PLATFORM: Setup authentication for specific platforms
+./cringesweeper auth --platforms=bluesky,mastodon
 
 # Check credential status for all platforms (--platform flag is ignored with --status)
 ./cringesweeper auth --status
@@ -285,7 +313,11 @@ Run CringeSweeper as a persistent service with periodic pruning and Prometheus m
 **Server-specific Flags:**
 - `-P, --port int`: HTTP server port (default 8080)
 - `--prune-interval string`: Time between prune runs (e.g., 30m, 1h, 2h) (default "1h")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - All `prune` command flags are supported for periodic operations
+
+**Note:** Multi-platform server support is currently in development. The server will use the first specified platform only.
 
 **Important:** In server mode, credentials are ONLY read from environment variables (no config files).
 
@@ -414,6 +446,9 @@ The auth command can automatically save credentials to config files for persiste
 # Check what would be processed (uses saved credentials)
 ./cringesweeper prune --max-post-age=365d --preserve-pinned --preserve-selflike --dry-run
 
+# MULTI-PLATFORM: Check cleanup across all platforms
+./cringesweeper prune --platforms=all --max-post-age=365d --preserve-pinned --preserve-selflike --dry-run
+
 # Gentle cleanup: unlike old posts, unshare old reposts
 ./cringesweeper prune --max-post-age=365d --unlike-posts --unshare-reposts --preserve-pinned
 
@@ -426,25 +461,35 @@ The auth command can automatically save credentials to config files for persiste
 
 ### Cross-Platform Management
 ```bash
-# View recent posts from multiple platforms (using saved credentials)
+# MULTI-PLATFORM: View recent posts from all platforms simultaneously
+./cringesweeper ls --platforms=all
+
+# MULTI-PLATFORM: Search through entire timeline on all platforms
+./cringesweeper ls --platforms=all --continue --max-post-age=1y
+
+# Legacy: View recent posts from multiple platforms (using saved credentials)
 ./cringesweeper ls --platform=bluesky
 ./cringesweeper ls --platform=mastodon
 
-# Search through entire timeline on both platforms
-./cringesweeper ls --continue --platform=bluesky --max-post-age=1y
-./cringesweeper ls --continue --platform=mastodon --before-date=2024-01-01
+# MULTI-PLATFORM: Prune old posts from all platforms
+./cringesweeper prune --platforms=all --max-post-age=6m --dry-run
 
-# Prune old posts from both platforms
+# Legacy: Prune old posts from both platforms separately
 ./cringesweeper prune --platform=bluesky --max-post-age=6m --dry-run
 ./cringesweeper prune --platform=mastodon --max-post-age=6m --dry-run
 
-# Comprehensive cleanup across platforms
-./cringesweeper prune --continue --platform=bluesky --max-post-age=6m --dry-run
-./cringesweeper prune --continue --platform=mastodon --max-post-age=6m --dry-run
+# MULTI-PLATFORM: Comprehensive cleanup across all platforms
+./cringesweeper prune --platforms=all --continue --max-post-age=6m --dry-run
 ```
 
 ### Spring Cleaning
 ```bash
+# MULTI-PLATFORM: Preview gentle cleanup across all platforms
+./cringesweeper prune --platforms=all --before-date="2024-01-01" --unlike-posts --unshare-reposts --preserve-pinned --dry-run
+
+# MULTI-PLATFORM: Comprehensive spring cleaning with continuous processing
+./cringesweeper prune --platforms=all --continue --before-date="2024-01-01" --preserve-pinned --preserve-selflike --dry-run
+
 # Preview gentle cleanup before 2024 (unlike + unshare instead of delete)
 ./cringesweeper prune --before-date="2024-01-01" --unlike-posts --unshare-reposts --preserve-pinned --dry-run
 
