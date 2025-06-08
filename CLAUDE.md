@@ -127,7 +127,8 @@ All commands support multi-platform operations:
   - Serves Prometheus metrics at `/metrics` endpoint
 
 All commands support:
-- `--platform` flag to specify target social network
+- `--platforms` flag for multi-platform operations (comma-separated list or "all")
+- `--platform` flag for single platform (LEGACY - use --platforms instead)
 - `--log-level` flag for debugging (debug, info, warn, error)
 
 ### Testing

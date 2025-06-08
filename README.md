@@ -105,7 +105,7 @@ Display recent posts from a user's timeline with optional filtering and continuo
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
 - `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--limit string`: Maximum number of posts to fetch per batch (default "10")
 - `--max-post-age string`: Only show posts older than this (e.g., 30d, 1y, 24h)
@@ -176,7 +176,7 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
 - `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--max-post-age string`: Delete posts older than this (e.g., 30d, 1y, 24h)
 - `--before-date string`: Delete posts created before this date (YYYY-MM-DD or MM/DD/YYYY)
@@ -279,7 +279,7 @@ Guide you through setting up authentication credentials for social media platfor
 ```
 
 **Flags:**
-- `-p, --platform string`: Social media platform to authenticate with (bluesky, mastodon) - legacy flag (default "bluesky")
+- `-p, --platform string`: Social media platform to authenticate with (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
 - `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - `--status`: Show credential status for all platforms (ignores --platform flag)
 - `-h, --help`: Help for auth command
@@ -313,7 +313,7 @@ Run CringeSweeper as a persistent service with periodic pruning and Prometheus m
 **Server-specific Flags:**
 - `-P, --port int`: HTTP server port (default 8080)
 - `--prune-interval string`: Time between prune runs (e.g., 30m, 1h, 2h) (default "1h")
-- `-p, --platform string`: Social media platform (bluesky, mastodon) - legacy flag (default "bluesky")
+- `-p, --platform string`: Social media platform (bluesky, mastodon) - LEGACY: use --platforms instead (default "bluesky")
 - `--platforms string`: Comma-separated list of platforms (bluesky,mastodon) or 'all' for all platforms
 - All `prune` command flags are supported for periodic operations
 
