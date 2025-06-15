@@ -3,9 +3,11 @@ package internal
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +59,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 	} else {
 		// Use public fetch without viewer data
 		statuses, err = c.fetchUserStatuses(instanceURL, accountID, limit)
+		creds = nil // Ensure no credentials used for public fetch
 	}
 
 	if err != nil {
@@ -113,8 +116,14 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 			post.Type = PostTypeReply
 			post.InReplyToID = *status.InReplyToID
 			if status.InReplyToAccountID != nil {
-				// We'd need additional API call to get the account info
-				// For now, just store the ID
+				// Fetch reply author information
+				if replyAccount, err := c.fetchAccountInfo(instanceURL, *status.InReplyToAccountID, creds); err == nil {
+					post.InReplyToAuthor = replyAccount.DisplayName
+					if post.InReplyToAuthor == "" {
+						post.InReplyToAuthor = replyAccount.Acct
+					}
+				}
+				// Continue silently if account fetch fails to avoid disrupting the main operation
 			}
 		}
 
@@ -147,6 +156,7 @@ func (c *MastodonClient) FetchUserPostsPaginated(username string, limit int, cur
 	} else {
 		// Use public fetch without viewer data
 		statuses, nextCursor, err = c.fetchUserStatusesPaginatedPublic(instanceURL, accountID, limit, cursor)
+		creds = nil // Ensure no credentials used for public fetch
 	}
 
 	if err != nil {
@@ -203,8 +213,14 @@ func (c *MastodonClient) FetchUserPostsPaginated(username string, limit int, cur
 			post.Type = PostTypeReply
 			post.InReplyToID = *status.InReplyToID
 			if status.InReplyToAccountID != nil {
-				// We'd need additional API call to get the account info
-				// For now, just store the ID
+				// Fetch reply author information
+				if replyAccount, err := c.fetchAccountInfo(instanceURL, *status.InReplyToAccountID, creds); err == nil {
+					post.InReplyToAuthor = replyAccount.DisplayName
+					if post.InReplyToAuthor == "" {
+						post.InReplyToAuthor = replyAccount.Acct
+					}
+				}
+				// Continue silently if account fetch fails to avoid disrupting the main operation
 			}
 		}
 
@@ -490,25 +506,54 @@ func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID s
 	return statuses, nil
 }
 
-// stripHTML removes HTML tags from content (basic implementation)
+// stripHTML removes HTML tags from content using proper HTML parsing and regex
 func (c *MastodonClient) stripHTML(content string) string {
-	// Simple HTML tag removal - for production use, consider using a proper HTML parser
-	result := content
-	result = strings.ReplaceAll(result, "<br>", "\n")
-	result = strings.ReplaceAll(result, "<br/>", "\n")
-	result = strings.ReplaceAll(result, "<br />", "\n")
-	result = strings.ReplaceAll(result, "</p>", "\n")
-
-	// Remove all other HTML tags (simple regex would be better)
-	for strings.Contains(result, "<") && strings.Contains(result, ">") {
-		start := strings.Index(result, "<")
-		end := strings.Index(result[start:], ">")
-		if end == -1 {
-			break
-		}
-		result = result[:start] + result[start+end+1:]
+	if content == "" {
+		return ""
 	}
 
+	// First, handle common HTML entities
+	result := html.UnescapeString(content)
+
+	// Convert common block-level elements to newlines
+	blockElements := []string{
+		"</p>", "</div>", "</article>", "</section>", 
+		"</header>", "</footer>", "</main>", "</aside>",
+		"</h1>", "</h2>", "</h3>", "</h4>", "</h5>", "</h6>",
+		"</li>", "</dd>", "</dt>",
+	}
+	for _, element := range blockElements {
+		result = strings.ReplaceAll(result, element, element+"\n")
+	}
+
+	// Convert line break elements to newlines
+	lineBreaks := []string{"<br>", "<br/>", "<br />", "<br>\n", "<br/>\n", "<br />\n"}
+	for _, br := range lineBreaks {
+		result = strings.ReplaceAll(result, br, "\n")
+	}
+
+	// Use regex to remove all remaining HTML tags
+	// This is more robust than the previous loop-based approach
+	htmlTagRegex := regexp.MustCompile(`<[^>]*>`)
+	result = htmlTagRegex.ReplaceAllString(result, "")
+
+	// Clean up whitespace
+	// Replace multiple consecutive newlines with double newlines (paragraph breaks)
+	multipleNewlines := regexp.MustCompile(`\n{3,}`)
+	result = multipleNewlines.ReplaceAllString(result, "\n\n")
+
+	// Replace multiple consecutive spaces with single spaces
+	multipleSpaces := regexp.MustCompile(`[ \t]+`)
+	result = multipleSpaces.ReplaceAllString(result, " ")
+
+	// Trim leading/trailing whitespace from each line
+	lines := strings.Split(result, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+
+	// Remove empty lines at the beginning and end, but preserve internal structure
+	result = strings.Join(lines, "\n")
 	return strings.TrimSpace(result)
 }
 
@@ -759,6 +804,48 @@ func (c *MastodonClient) ensureAuthenticated(creds *Credentials, instanceURL str
 	}
 }
 
+
+// fetchAccountInfo fetches account information by account ID
+func (c *MastodonClient) fetchAccountInfo(instanceURL, accountID string, creds *Credentials) (*mastodonAccount, error) {
+	accountURL := fmt.Sprintf("%s/api/v1/accounts/%s", instanceURL, accountID)
+
+	req, err := http.NewRequest("GET", accountURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add authentication header if credentials are provided
+	if creds != nil {
+		req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
+	}
+
+	LogHTTPRequest("GET", accountURL)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch account: %w", err)
+	}
+	defer resp.Body.Close()
+
+	LogHTTPResponse("GET", accountURL, resp.StatusCode, resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("account request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read account response: %w", err)
+	}
+
+	var account mastodonAccount
+	if err := json.Unmarshal(body, &account); err != nil {
+		return nil, fmt.Errorf("failed to parse account response: %w", err)
+	}
+
+	return &account, nil
+}
 
 // fetchFavoriteIDs fetches IDs of posts that the user has favorited
 func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials, limit int) ([]string, error) {

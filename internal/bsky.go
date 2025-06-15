@@ -66,11 +66,11 @@ func (c *BlueskyClient) FetchUserPosts(username string, limit int) ([]Post, erro
 			post.Author = bskyPost.Author.Handle
 		}
 
-		// Set viewer interaction status
+		// Set viewer interaction status and pinned status
 		if bskyPost.ViewerData != nil {
 			post.IsLikedByUser = bskyPost.ViewerData.Like != nil
-			// Note: IsPinned would need to be determined from the feed metadata
 		}
+		post.IsPinned = bskyPost.IsPinned
 
 		// Handle reposts - these are the user's own repost records, not the original posts
 		if bskyPost.Record.Type == "app.bsky.feed.repost" {
@@ -125,11 +125,11 @@ func (c *BlueskyClient) FetchUserPostsPaginated(username string, limit int, curs
 			post.Author = bskyPost.Author.Handle
 		}
 
-		// Set viewer interaction status
+		// Set viewer interaction status and pinned status
 		if bskyPost.ViewerData != nil {
 			post.IsLikedByUser = bskyPost.ViewerData.Like != nil
-			// Note: IsPinned would need to be determined from the feed metadata
 		}
+		post.IsPinned = bskyPost.IsPinned
 
 		// Handle reposts - these are the user's own repost records, not the original posts
 		if bskyPost.Record.Type == "app.bsky.feed.repost" {
@@ -144,10 +144,20 @@ func (c *BlueskyClient) FetchUserPostsPaginated(username string, limit int, curs
 			post.InReplyToID = bskyPost.Record.Reply.Parent.URI
 		}
 
-		// Note: Likes are not returned by getAuthorFeed - they need to be fetched separately
-		// if we want to include them in the pruning process
-
 		genericPosts = append(genericPosts, post)
+	}
+
+	// Fetch user's liked posts separately and include them in the results
+	// This allows likes to be included in pruning operations and listing
+	if cursor == "" { // Only fetch likes on the first page to avoid duplicates
+		likedPosts, err := c.fetchLikedPostsIntegrated(limit)
+		if err != nil {
+			// Log the error but don't fail the entire operation
+			logger := WithPlatform("bluesky")
+			logger.Warn().Err(err).Msg("Failed to fetch liked posts, continuing without them")
+		} else {
+			genericPosts = append(genericPosts, likedPosts...)
+		}
 	}
 
 	return genericPosts, nextCursor, nil
@@ -193,8 +203,9 @@ func (c *BlueskyClient) fetchBlueskyPostsPaginated(username string, limit int, c
 
 	var posts []blueskyPost
 	for _, item := range feedResponse.Feed {
-		// Enhance post with viewer information
+		// Enhance post with viewer information and pinned status
 		item.Post.ViewerData = item.ViewerData
+		item.Post.IsPinned = item.PinnedPost
 		posts = append(posts, item.Post)
 	}
 
@@ -219,6 +230,9 @@ type blueskyPost struct {
 	RepostCount int `json:"repostCount,omitempty"`
 	LikeCount   int `json:"likeCount,omitempty"`
 	ReplyCount  int `json:"replyCount,omitempty"`
+
+	// Pinned status
+	IsPinned bool `json:"-"` // Added separately from feed metadata
 }
 
 type blueskyAuthor struct {
@@ -295,8 +309,9 @@ func (c *BlueskyClient) fetchBlueskyPosts(username string, limit int) ([]bluesky
 
 	var posts []blueskyPost
 	for _, item := range feedResponse.Feed {
-		// Enhance post with viewer information
+		// Enhance post with viewer information and pinned status
 		item.Post.ViewerData = item.ViewerData
+		item.Post.IsPinned = item.PinnedPost
 		posts = append(posts, item.Post)
 	}
 
@@ -976,6 +991,29 @@ func (c *BlueskyClient) deleteLikeRecord(creds *Credentials, likeURI string) err
 	}
 
 	return nil
+}
+
+// fetchLikedPostsIntegrated fetches liked posts with authentication handling for integration
+func (c *BlueskyClient) fetchLikedPostsIntegrated(limit int) ([]Post, error) {
+	// Get authentication credentials
+	creds, err := GetCredentialsForPlatform("bluesky")
+	if err != nil {
+		// Return empty slice if no credentials available
+		return []Post{}, nil
+	}
+
+	if err := ValidateCredentials(creds); err != nil {
+		// Return empty slice if credentials are invalid
+		return []Post{}, nil
+	}
+
+	// Create session and fetch liked posts
+	session, err := c.ensureValidSession(creds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate for liked posts: %w", err)
+	}
+
+	return c.fetchLikedPosts(session, limit)
 }
 
 // deleteRepostRecord deletes a repost record directly (simpler than unrepost)
