@@ -90,6 +90,40 @@ Each social platform implements the `SocialClient` interface:
 - **Bluesky** (`internal/bsky.go`): Uses app passwords, faster rate limits (1s default)
 - **Mastodon** (`internal/mastodon.go`): Uses OAuth2 tokens, conservative rate limits (60s default)
 
+### Multi-Platform Server Architecture
+
+The server mode (`cmd/server.go`) implements a sophisticated concurrent architecture for multi-platform monitoring:
+
+#### Goroutine Architecture
+- **Main HTTP Server**: Serves web interface, JSON API, and Prometheus metrics without blocking
+- **Platform Monitoring Goroutines**: Each platform runs in its own dedicated goroutine with independent:
+  - Pruning schedules and intervals
+  - Rate limiting and API throttling
+  - Error handling and retry logic
+  - Metrics collection and reporting
+
+#### Server State Management
+- **Thread-Safe State**: `ServerState` struct with mutex protection for concurrent access
+- **Per-Platform Status**: Real-time tracking of pruning status, metrics, and health per platform
+- **Live Updates**: Platform statuses update in real-time without blocking other platforms
+
+#### Prometheus Metrics
+- **Platform-Specific Metrics**: All metrics include platform labels for multi-platform observability
+- **Active Platform Tracking**: `cringesweeper_platform_active` gauge indicates platform operational status
+- **Pruning Status**: `cringesweeper_platform_pruning` gauge shows real-time pruning activity
+- **Independent Scheduling**: Each platform maintains separate run counts, durations, and success rates
+
+#### Web Interface
+- **Multi-Platform Dashboard**: Shows status for all configured platforms simultaneously
+- **Auto-Refresh**: Page automatically refreshes every 30 seconds for live monitoring
+- **Per-Platform Metrics**: Detailed statistics and status for each platform
+- **JSON API**: `/api/status` endpoint provides programmatic access to complete server state
+
+#### Graceful Shutdown
+- **Coordinated Shutdown**: Cleanly stops all platform goroutines on termination signals
+- **Resource Cleanup**: Properly cancels contexts and waits for completion of in-progress operations
+- **Status Updates**: Updates platform metrics to reflect shutdown state
+
 ### Adding New Platforms
 
 To add support for a new social platform:
@@ -116,14 +150,16 @@ All commands support multi-platform operations:
   - `--continue`: Process entire timeline instead of just recent posts
   - `--dry-run`: Preview actions without performing them
   - All age filtering options from `ls` command
-- **`server`**: Long-term service mode with periodic pruning and metrics
-  - `--platforms`: Monitor multiple platforms (currently uses first platform only)
-  - Full multi-platform server support planned for future releases
+- **`server`**: Long-term service mode with concurrent multi-platform pruning and metrics
+  - `--platforms`: Monitor multiple platforms concurrently with dedicated goroutines per platform
+  - Full multi-platform server support with independent scheduling and monitoring
   - `--port`: HTTP server port (default: 8080)
-  - `--prune-interval`: Time between prune runs (default: 1h)
-  - All prune flags supported for periodic operations
+  - `--prune-interval`: Time between prune runs for each platform (default: 1h)
+  - All prune flags supported for periodic operations across all platforms
   - Credentials ONLY from environment variables (no config files)
-  - Serves Prometheus metrics at `/metrics` endpoint
+  - Serves comprehensive multi-platform metrics at `/metrics` endpoint
+  - Real-time platform status at `/` with auto-refresh and detailed per-platform information
+  - JSON API endpoint at `/api/status` for programmatic access to multi-platform status
 
 All commands support:
 - `--platforms` flag for multi-platform operations (comma-separated list or "all")
@@ -148,16 +184,19 @@ CringeSweeper includes full Docker support for containerized deployments:
 - **`.dockerignore`**: Optimized build context
 - **`.env.example`**: Template for environment configuration
 
-### Server Mode for Containers
+### Multi-Platform Server Mode for Containers
 
-The `server` command is specifically designed for long-term containerized deployment:
+The `server` command is specifically designed for long-term containerized deployment with full multi-platform support:
 
-- **Environment-only credentials**: No config files, only environment variables
-- **Health checks**: Built-in HTTP health endpoint at `/`
-- **Prometheus metrics**: Comprehensive metrics at `/metrics`
-- **Graceful shutdown**: Proper signal handling for container orchestration
+- **Concurrent Multi-Platform Processing**: Each platform runs in its own goroutine with independent scheduling
+- **Environment-only credentials**: No config files, only environment variables for all platforms
+- **Multi-Platform Health Checks**: Built-in HTTP health endpoint at `/` with per-platform status dashboard
+- **Comprehensive Prometheus Metrics**: Platform-specific metrics at `/metrics` with full observability
+- **JSON API**: `/api/status` endpoint for programmatic multi-platform status access
+- **Graceful Multi-Platform Shutdown**: Coordinated shutdown of all platform goroutines
 - **Non-root execution**: Runs as unprivileged user for security
-- **Resource efficient**: Minimal memory footprint suitable for constrained environments
+- **Resource efficient**: Optimized goroutine architecture suitable for constrained environments
+- **Real-time Updates**: Web interface auto-refreshes with live platform status without blocking
 
 ### Quick Start with Docker
 
@@ -165,8 +204,11 @@ The `server` command is specifically designed for long-term containerized deploy
 # Build with version information
 docker build --build-arg VERSION=0.0.1 --build-arg COMMIT=$(git rev-parse HEAD) --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) -t cringesweeper .
 
-# Run server
-docker run -d -p 8080:8080 --env-file .env cringesweeper server --platforms=bluesky --max-post-age=30d
+# Run multi-platform server
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platforms=bluesky,mastodon --max-post-age=30d
+
+# Run server with all platforms
+docker run -d -p 8080:8080 --env-file .env cringesweeper server --platforms=all --max-post-age=30d --prune-interval=2h
 ```
 
 ### Version Management
