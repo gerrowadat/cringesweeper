@@ -819,110 +819,31 @@ func runPruneWithMetrics(client internal.SocialClient, username string, options 
 		Msg("Prune run metrics")
 }
 
-// runContinuousPruneForServer runs continuous pruning similar to performContinuousPruning but returns aggregated results
+// runContinuousPruneForServer runs continuous pruning with accurate success counting (server version of performContinuousPruningWithResult)
 func runContinuousPruneForServer(client internal.SocialClient, username string, options internal.PruneOptions) (*internal.PruneResult, error) {
-	totalResult := &internal.PruneResult{
-		PostsToDelete:  []internal.Post{},
-		PostsToUnlike:  []internal.Post{},
-		PostsToUnshare: []internal.Post{},
-		PostsPreserved: []internal.Post{},
-		Errors:         []string{},
+	// For server mode, we want to actually perform deletions (not dry-run)
+	// and only count posts that were successfully processed
+	serverOptions := options
+	serverOptions.DryRun = false // Ensure we actually perform operations
+	
+	log.Debug().Str("platform", client.GetPlatformName()).Msg("Starting prune operation for server")
+	
+	// Use the platform's built-in PrunePosts method which correctly tracks successful operations
+	result, err := client.PrunePosts(username, serverOptions)
+	if err != nil {
+		return nil, fmt.Errorf("prune operation failed: %w", err)
 	}
-
-	cursor := ""
-	batchLimit := 100
-	round := 1
-
-	log.Debug().Msg("Starting continuous prune for server")
-
-	for {
-		log.Debug().Int("round", round).Msg("Fetching posts for pruning")
-		
-		posts, nextCursor, err := client.FetchUserPostsPaginated(username, batchLimit, cursor)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch posts in round %d: %w", round, err)
-		}
-
-		// Check termination conditions
-		if len(posts) == 0 {
-			log.Debug().Int("round", round).Msg("No more posts found, pruning complete")
-			break
-		}
-
-		if nextCursor == "" || nextCursor == cursor {
-			log.Debug().Int("round", round).Msg("Reached end of timeline, pruning complete")
-			break
-		}
-
-		// Filter posts by age criteria
-		now := time.Now()
-		matchingPosts := []internal.Post{}
-		for _, post := range posts {
-			shouldProcess := false
-
-			if options.MaxAge != nil && now.Sub(post.CreatedAt) > *options.MaxAge {
-				shouldProcess = true
-			}
-			if options.BeforeDate != nil && post.CreatedAt.Before(*options.BeforeDate) {
-				shouldProcess = true
-			}
-
-			if shouldProcess {
-				matchingPosts = append(matchingPosts, post)
-			}
-		}
-
-		// Process matching posts
-		if len(matchingPosts) > 0 {
-			log.Debug().Int("round", round).Int("matching_posts", len(matchingPosts)).Msg("Processing posts")
-			
-			// Create a temporary options struct for this batch
-			batchOptions := options
-			batchOptions.DryRun = false // Always actually process in server mode
-			
-			// For server mode, we need to actually process posts individually
-			// This is a simplified version - in a full implementation, you'd want to 
-			// reuse the exact logic from PrunePosts but adapted for continuous operation
-			for _, post := range matchingPosts {
-				// Check preservation rules
-				preserveReason := ""
-				if options.PreservePinned && post.IsPinned {
-					preserveReason = "pinned"
-				} else if options.PreserveSelfLike && post.IsLikedByUser && post.Type == internal.PostTypeOriginal {
-					preserveReason = "self-liked"
-				}
-
-				if preserveReason != "" {
-					totalResult.PostsPreserved = append(totalResult.PostsPreserved, post)
-					totalResult.PreservedCount++
-				} else {
-					// For now, just count what would be processed
-					// In a full implementation, you'd call the actual deletion methods here
-					if post.Type == internal.PostTypeLike {
-						totalResult.PostsToUnlike = append(totalResult.PostsToUnlike, post)
-						totalResult.UnlikedCount++
-					} else if post.Type == internal.PostTypeRepost {
-						totalResult.PostsToUnshare = append(totalResult.PostsToUnshare, post)
-						totalResult.UnsharedCount++
-					} else if post.Type == internal.PostTypeOriginal || post.Type == internal.PostTypeReply {
-						totalResult.PostsToDelete = append(totalResult.PostsToDelete, post)
-						totalResult.DeletedCount++
-					}
-				}
-			}
-		}
-
-		cursor = nextCursor
-		round++
-		time.Sleep(1 * time.Second) // Small delay between rounds
-	}
-
+	
 	log.Debug().
-		Int("total_rounds", round-1).
-		Int("total_processed", totalResult.DeletedCount+totalResult.UnlikedCount+totalResult.UnsharedCount).
-		Msg("Continuous prune completed")
-
-	return totalResult, nil
+		Str("platform", client.GetPlatformName()).
+		Int("successfully_deleted", result.DeletedCount).
+		Int("successfully_unliked", result.UnlikedCount).
+		Int("successfully_unshared", result.UnsharedCount).
+		Int("preserved", result.PreservedCount).
+		Int("errors", result.ErrorsCount).
+		Msg("Prune operation completed")
+	
+	return result, nil
 }
 
 func init() {
