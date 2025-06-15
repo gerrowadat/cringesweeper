@@ -12,7 +12,7 @@ LDFLAGS = -X github.com/gerrowadat/cringesweeper/internal.Version=${VERSION} \
           -X github.com/gerrowadat/cringesweeper/internal.BuildTime=${BUILD_TIME}
 
 # Docker variables
-DOCKER_IMAGE = cringesweeper
+DOCKER_IMAGE = gerrowadat/cringesweeper
 DOCKER_TAG ?= ${VERSION}
 
 .PHONY: help build clean test vet fmt docker-build docker-run docker-clean version info
