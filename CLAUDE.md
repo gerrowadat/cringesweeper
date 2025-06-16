@@ -184,6 +184,31 @@ CringeSweeper includes full Docker support for containerized deployments:
 - **`.dockerignore`**: Optimized build context
 - **`.env.example`**: Template for environment configuration
 
+### Monitoring Infrastructure
+
+The `monitoring/` directory provides a complete observability stack:
+
+- **`prometheus.yml`**: Prometheus configuration with service discovery and alerting rules
+- **`alert_rules.yml`**: Comprehensive alert definitions for service health, performance, and platform-specific issues
+- **`alertmanager.yml`**: Alert routing and notification configuration with multi-channel support
+- **`docker-compose.yml`**: Complete monitoring stack deployment with Prometheus, Alertmanager, and Grafana
+- **`grafana/`**: Pre-configured dashboards and datasource provisioning for comprehensive visualization
+
+#### Alert Categories
+
+- **Critical**: Service down, authentication failures, extremely high error rates
+- **Warning**: Performance degradation, moderate error rates, stale operations
+- **Info**: Configuration changes, deployment notifications, metric anomalies
+
+#### Grafana Dashboards
+
+The included dashboard provides:
+- Real-time service health and platform status
+- Post processing metrics and rates over time
+- Operation duration percentiles and error rates
+- Memory usage and performance monitoring
+- Platform-specific success tracking and alerting
+
 ### Multi-Platform Server Mode for Containers
 
 The `server` command is specifically designed for long-term containerized deployment with full multi-platform support:

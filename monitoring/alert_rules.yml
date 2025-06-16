@@ -1,0 +1,200 @@
+# Prometheus alerting rules for CringeSweeper
+# These rules define when alerts should be triggered based on metrics
+
+groups:
+  - name: cringesweeper.rules
+    interval: 30s
+    rules:
+      # Service Health Alerts
+      - alert: CringeSweeperDown
+        expr: up{job=~"cringesweeper.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper instance is down"
+          description: "CringeSweeper instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#service-down"
+
+      - alert: CringeSweeperHighErrorRate
+        expr: |
+          (
+            rate(cringesweeper_prune_errors_total[5m]) / 
+            (rate(cringesweeper_prune_operations_total[5m]) + rate(cringesweeper_prune_errors_total[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "High error rate in CringeSweeper operations"
+          description: "CringeSweeper on {{ $labels.instance }} has an error rate of {{ $value | humanizePercentage }} over the last 5 minutes."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#high-error-rate"
+
+      # Platform-Specific Alerts
+      - alert: CringeSweeperPlatformDown
+        expr: cringesweeper_platform_last_success_timestamp{platform=~"bluesky|mastodon"} < (time() - 3600)
+        for: 2m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper platform has not succeeded recently"
+          description: "Platform {{ $labels.platform }} on instance {{ $labels.instance }} has not had a successful operation in over 1 hour."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#platform-issues"
+
+      - alert: CringeSweeperAuthenticationFailure
+        expr: increase(cringesweeper_auth_failures_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper authentication failures detected"
+          description: "Authentication failures detected for platform {{ $labels.platform }} on instance {{ $labels.instance }}. Check credentials."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#authentication-failures"
+
+      # Performance Alerts
+      - alert: CringeSweeperSlowOperations
+        expr: |
+          histogram_quantile(0.95, 
+            rate(cringesweeper_operation_duration_seconds_bucket[5m])
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper operations are running slowly"
+          description: "95th percentile operation duration on {{ $labels.instance }} is {{ $value }}s, indicating slow performance."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#slow-operations"
+
+      - alert: CringeSweeperHighMemoryUsage
+        expr: |
+          (
+            process_resident_memory_bytes{job=~"cringesweeper.*"} / 
+            (1024 * 1024 * 1024)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper memory usage is high"
+          description: "CringeSweeper on {{ $labels.instance }} is using {{ $value | humanize }}GB of memory."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#high-memory-usage"
+
+      # Business Logic Alerts
+      - alert: CringeSweeperNoDeletions
+        expr: |
+          increase(cringesweeper_posts_deleted_total[24h]) == 0 and 
+          increase(cringesweeper_prune_operations_total[24h]) > 0
+        for: 1h
+        labels:
+          severity: info
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper has not deleted any posts recently"
+          description: "No posts have been deleted on {{ $labels.instance }} in the last 24 hours, but pruning operations are running. This might be expected behavior."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#no-deletions"
+
+      - alert: CringeSweeperHighDeletionRate
+        expr: rate(cringesweeper_posts_deleted_total[1h]) > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper deletion rate is unusually high"
+          description: "CringeSweeper on {{ $labels.instance }} is deleting posts at a rate of {{ $value | humanize }} posts/hour, which is unusually high."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#high-deletion-rate"
+
+      # Rate Limiting Alerts
+      - alert: CringeSweeperRateLimited
+        expr: increase(cringesweeper_rate_limit_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper is being rate limited"
+          description: "Platform {{ $labels.platform }} on instance {{ $labels.instance }} is experiencing rate limiting. Consider increasing delays."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#rate-limiting"
+
+      # Data Consistency Alerts
+      - alert: CringeSweeperPlatformDesync
+        expr: |
+          abs(
+            cringesweeper_platform_last_success_timestamp{platform="bluesky"} - 
+            cringesweeper_platform_last_success_timestamp{platform="mastodon"}
+          ) > 7200
+        for: 5m
+        labels:
+          severity: warning
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper platforms are out of sync"
+          description: "Bluesky and Mastodon platforms on {{ $labels.instance }} have success timestamps more than 2 hours apart."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Troubleshooting#platform-desync"
+
+  - name: cringesweeper.aggregation
+    interval: 1m
+    rules:
+      # Recording rules for better performance and easier alerting
+      - record: cringesweeper:error_rate_5m
+        expr: |
+          rate(cringesweeper_prune_errors_total[5m]) / 
+          (rate(cringesweeper_prune_operations_total[5m]) + rate(cringesweeper_prune_errors_total[5m]))
+
+      - record: cringesweeper:total_posts_processed_24h
+        expr: |
+          increase(cringesweeper_posts_deleted_total[24h]) +
+          increase(cringesweeper_posts_unliked_total[24h]) +
+          increase(cringesweeper_posts_unshared_total[24h])
+
+      - record: cringesweeper:operation_duration_95p
+        expr: |
+          histogram_quantile(0.95, 
+            rate(cringesweeper_operation_duration_seconds_bucket[5m])
+          )
+
+      - record: cringesweeper:platform_health_score
+        expr: |
+          (
+            (time() - cringesweeper_platform_last_success_timestamp) < 3600 and
+            rate(cringesweeper_prune_errors_total[5m]) == 0
+          )
+
+  - name: cringesweeper.capacity
+    interval: 2m
+    rules:
+      # Capacity planning alerts
+      - alert: CringeSweeperApproachingDailyLimits
+        expr: |
+          (
+            increase(cringesweeper_posts_deleted_total[1h]) * 24
+          ) > 2000
+        for: 5m
+        labels:
+          severity: info
+          service: cringesweeper
+        annotations:
+          summary: "CringeSweeper may approach daily API limits"
+          description: "Current deletion rate on {{ $labels.instance }} suggests {{ $value | humanize }} deletions per day, which may approach platform limits."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Capacity-Planning"
+
+      - alert: CringeSweeperDiskSpaceWarning
+        expr: |
+          (
+            node_filesystem_avail_bytes{job="node-exporter",fstype!="tmpfs"} / 
+            node_filesystem_size_bytes{job="node-exporter",fstype!="tmpfs"}
+          ) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Low disk space on CringeSweeper host"
+          description: "Disk space on {{ $labels.instance }} is below 10% ({{ $value | humanizePercentage }} free)."
+          runbook_url: "https://github.com/gerrowadat/cringesweeper/wiki/Maintenance#disk-space"

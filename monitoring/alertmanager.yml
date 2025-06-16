@@ -1,0 +1,196 @@
+# Alertmanager configuration for CringeSweeper
+# This configuration defines how alerts are routed and what notifications are sent
+
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'cringesweeper-alerts@example.com'
+  smtp_auth_username: 'alerts@example.com'
+  smtp_auth_password: 'your-email-password'
+
+# Templates for alert notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# The root route on which each incoming alert enters
+route:
+  # The labels by which incoming alerts are grouped together
+  group_by: ['alertname', 'instance', 'platform']
+  
+  # When a new group of alerts is created, wait this long before sending
+  group_wait: 30s
+  
+  # When the first notification was sent, wait this long before sending again
+  group_interval: 5m
+  
+  # If an alert has successfully been sent, wait this long before re-sending
+  repeat_interval: 12h
+  
+  # Default receiver
+  receiver: 'web.hook.default'
+  
+  # Child routes
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+    
+    # Warning alerts - standard notification
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    
+    # Info alerts - less frequent notification
+    - match:
+        severity: info
+      receiver: 'info-alerts'
+      group_wait: 5m
+      group_interval: 15m
+      repeat_interval: 24h
+    
+    # Platform-specific alerts
+    - match:
+        service: cringesweeper
+        platform: bluesky
+      receiver: 'bluesky-alerts'
+      continue: true
+    
+    - match:
+        service: cringesweeper
+        platform: mastodon
+      receiver: 'mastodon-alerts'
+      continue: true
+
+receivers:
+  # Default webhook receiver
+  - name: 'web.hook.default'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+  # Critical alerts - multiple notification channels
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'admin@example.com'
+        subject: '[CRITICAL] CringeSweeper Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Platform: {{ .Labels.platform }}
+          Severity: {{ .Labels.severity }}
+          
+          Details: {{ .Annotations.runbook_url }}
+          {{ end }}
+        headers:
+          X-Priority: 'High'
+    
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#alerts'
+        title: ':red_circle: Critical CringeSweeper Alert'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Instance: `{{ .Labels.instance }}`
+          Platform: `{{ .Labels.platform }}`
+          <{{ .Annotations.runbook_url }}|Runbook>
+          {{ end }}
+    
+    webhook_configs:
+      - url: 'http://localhost:5001/critical'
+        send_resolved: true
+
+  # Warning alerts
+  - name: 'warning-alerts'
+    email_configs:
+      - to: 'admin@example.com'
+        subject: '[WARNING] CringeSweeper Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Platform: {{ .Labels.platform }}
+          Severity: {{ .Labels.severity }}
+          
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#alerts'
+        title: ':warning: CringeSweeper Warning'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          Instance: `{{ .Labels.instance }}`
+          Platform: `{{ .Labels.platform }}`
+          {{ end }}
+
+  # Info alerts - minimal notification
+  - name: 'info-alerts'
+    email_configs:
+      - to: 'admin@example.com'
+        subject: '[INFO] CringeSweeper: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          Instance: {{ .Labels.instance }}
+          {{ end }}
+
+  # Bluesky-specific alerts
+  - name: 'bluesky-alerts'
+    email_configs:
+      - to: 'bluesky-admin@example.com'
+        subject: '[BLUESKY] CringeSweeper Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Bluesky Platform Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          {{ end }}
+
+  # Mastodon-specific alerts
+  - name: 'mastodon-alerts'
+    email_configs:
+      - to: 'mastodon-admin@example.com'
+        subject: '[MASTODON] CringeSweeper Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Mastodon Platform Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          {{ end }}
+
+# Inhibition rules allow to mute a set of alerts given that another alert is firing
+inhibit_rules:
+  # Mute platform-specific alerts if the whole service is down
+  - source_match:
+      alertname: CringeSweeperDown
+    target_match_re:
+      alertname: CringeSweeperPlatform.*
+    equal: ['instance']
+  
+  # Mute high error rate alerts if authentication is failing
+  - source_match:
+      alertname: CringeSweeperAuthenticationFailure
+    target_match:
+      alertname: CringeSweeperHighErrorRate
+    equal: ['instance', 'platform']
+  
+  # Mute performance alerts if the service is down
+  - source_match:
+      alertname: CringeSweeperDown
+    target_match_re:
+      alertname: CringeSweeperSlow.*|CringeSweeperHigh.*
+    equal: ['instance']
