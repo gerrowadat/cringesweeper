@@ -395,7 +395,7 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 
 	// If user wants to unlike posts, also fetch their liked posts
 	if options.UnlikePosts {
-		likedPosts, err := c.fetchLikedPosts(session, 100)
+		likedPosts, err := c.fetchAllLikedPosts(session, options)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to fetch liked posts: %v\n", err)
 		} else {
@@ -404,7 +404,7 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 	}
 
 	// Always fetch the user's repost records separately to ensure we get the correct repost URIs
-	repostPosts, err := c.fetchRepostPosts(session, 100)
+	repostPosts, err := c.fetchAllRepostPosts(session, options)
 	if err != nil {
 		fmt.Printf("⚠️  Warning: Failed to fetch repost records: %v\n", err)
 	} else {
@@ -966,6 +966,200 @@ func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) 
 	}
 
 	return likedPosts, nil
+}
+
+// fetchAllRepostPosts fetches ALL repost records using pagination based on age criteria
+func (c *BlueskyClient) fetchAllRepostPosts(session *atpSessionResponse, options PruneOptions) ([]Post, error) {
+	var allRepostPosts []Post
+	cursor := ""
+	batchSize := 100
+	
+	for {
+		listURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords"
+		params := url.Values{}
+		params.Add("repo", session.DID)
+		params.Add("collection", "app.bsky.feed.repost")
+		params.Add("limit", fmt.Sprintf("%d", batchSize))
+		if cursor != "" {
+			params.Add("cursor", cursor)
+		}
+		
+		fullURL := fmt.Sprintf("%s?%s", listURL, params.Encode())
+		
+		req, err := http.NewRequest("GET", fullURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create list request: %w", err)
+		}
+		
+		req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+		
+		client := &http.Client{Timeout: 30 * time.Second}
+		LogHTTPRequest("GET", fullURL)
+		resp, err := client.Do(req)
+		LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
+		if err != nil {
+			return nil, fmt.Errorf("list request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("list request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read list response: %w", err)
+		}
+		
+		var listResponse struct {
+			Records []struct {
+				URI   string `json:"uri"`
+				Value struct {
+					Subject struct {
+						URI string `json:"uri"`
+					} `json:"subject"`
+					CreatedAt time.Time `json:"createdAt"`
+				} `json:"value"`
+			} `json:"records"`
+			Cursor string `json:"cursor,omitempty"`
+		}
+		
+		if err := json.Unmarshal(body, &listResponse); err != nil {
+			return nil, fmt.Errorf("failed to parse list response: %w", err)
+		}
+		
+		if len(listResponse.Records) == 0 {
+			break // No more reposts to fetch
+		}
+		
+		// Check if we should continue fetching based on age criteria
+		shouldContinue := false
+		for _, record := range listResponse.Records {
+			post := Post{
+				ID:        record.URI, // This is the repost record URI, not the original post
+				Type:      PostTypeRepost,
+				Platform:  "bluesky",
+				CreatedAt: record.Value.CreatedAt,
+				Content:   fmt.Sprintf("Reposted: %s", record.Value.Subject.URI), // Show what was reposted
+			}
+			allRepostPosts = append(allRepostPosts, post)
+			
+			// Check if any repost in this batch matches the age criteria
+			if options.MaxAge != nil && time.Now().Sub(record.Value.CreatedAt) > *options.MaxAge {
+				shouldContinue = true
+			}
+			if options.BeforeDate != nil && record.Value.CreatedAt.Before(*options.BeforeDate) {
+				shouldContinue = true
+			}
+		}
+		
+		// Update cursor for next request
+		cursor = listResponse.Cursor
+		
+		if cursor == "" || !shouldContinue {
+			break // No more pages or no reposts match age criteria
+		}
+	}
+	
+	return allRepostPosts, nil
+}
+
+// fetchAllLikedPosts fetches ALL liked posts using pagination based on age criteria
+func (c *BlueskyClient) fetchAllLikedPosts(session *atpSessionResponse, options PruneOptions) ([]Post, error) {
+	var allLikedPosts []Post
+	cursor := ""
+	batchSize := 100
+	
+	for {
+		listURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords"
+		params := url.Values{}
+		params.Add("repo", session.DID)
+		params.Add("collection", "app.bsky.feed.like")
+		params.Add("limit", fmt.Sprintf("%d", batchSize))
+		if cursor != "" {
+			params.Add("cursor", cursor)
+		}
+		
+		fullURL := fmt.Sprintf("%s?%s", listURL, params.Encode())
+		
+		req, err := http.NewRequest("GET", fullURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create list request: %w", err)
+		}
+		
+		req.Header.Set("Authorization", "Bearer "+session.AccessJwt)
+		
+		client := &http.Client{Timeout: 30 * time.Second}
+		LogHTTPRequest("GET", fullURL)
+		resp, err := client.Do(req)
+		LogHTTPResponse("GET", fullURL, resp.StatusCode, resp.Status)
+		if err != nil {
+			return nil, fmt.Errorf("list request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("list request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read list response: %w", err)
+		}
+		
+		var listResponse struct {
+			Records []struct {
+				URI   string `json:"uri"`
+				Value struct {
+					Subject struct {
+						URI string `json:"uri"`
+					} `json:"subject"`
+					CreatedAt time.Time `json:"createdAt"`
+				} `json:"value"`
+			} `json:"records"`
+			Cursor string `json:"cursor,omitempty"`
+		}
+		
+		if err := json.Unmarshal(body, &listResponse); err != nil {
+			return nil, fmt.Errorf("failed to parse list response: %w", err)
+		}
+		
+		if len(listResponse.Records) == 0 {
+			break // No more likes to fetch
+		}
+		
+		// Check if we should continue fetching based on age criteria
+		shouldContinue := false
+		for _, record := range listResponse.Records {
+			post := Post{
+				ID:        record.URI, // This is the like record URI, not the original post
+				Type:      PostTypeLike,
+				Platform:  "bluesky",
+				CreatedAt: record.Value.CreatedAt,
+				Content:   fmt.Sprintf("Liked: %s", record.Value.Subject.URI), // Show what was liked
+			}
+			allLikedPosts = append(allLikedPosts, post)
+			
+			// Check if any like in this batch matches the age criteria
+			if options.MaxAge != nil && time.Now().Sub(record.Value.CreatedAt) > *options.MaxAge {
+				shouldContinue = true
+			}
+			if options.BeforeDate != nil && record.Value.CreatedAt.Before(*options.BeforeDate) {
+				shouldContinue = true
+			}
+		}
+		
+		// Update cursor for next request
+		cursor = listResponse.Cursor
+		
+		if cursor == "" || !shouldContinue {
+			break // No more pages or no likes match age criteria
+		}
+	}
+	
+	return allLikedPosts, nil
 }
 
 // deleteLikeRecord deletes a like record directly

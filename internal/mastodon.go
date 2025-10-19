@@ -619,7 +619,7 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 
 	// If user wants to unlike posts, also fetch their favorited posts
 	if options.UnlikePosts {
-		favoriteIDs, err := c.fetchFavoriteIDs(instanceURL, creds, 100)
+		favoriteIDs, err := c.fetchAllFavoriteIDs(instanceURL, creds, options)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to fetch favorited posts: %v\n", err)
 		} else {
@@ -925,5 +925,78 @@ func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials
 	}
 
 	return favoriteIDs, nil
+}
+
+// fetchAllFavoriteIDs fetches ALL favorited posts using pagination based on age criteria
+func (c *MastodonClient) fetchAllFavoriteIDs(instanceURL string, creds *Credentials, options PruneOptions) ([]string, error) {
+	c.ensureAuthenticated(creds, instanceURL)
+	var allFavoriteIDs []string
+	maxID := ""
+	batchSize := 100
+	
+	for {
+		favoritesURL := fmt.Sprintf("%s/api/v1/favourites", instanceURL)
+		params := url.Values{}
+		params.Add("limit", strconv.Itoa(batchSize))
+		if maxID != "" {
+			params.Add("max_id", maxID)
+		}
+		
+		fullURL := fmt.Sprintf("%s?%s", favoritesURL, params.Encode())
+		
+		req, err := c.authenticatedClient.CreateRequest("GET", fullURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		
+		resp, err := c.authenticatedClient.DoRequest(req)
+		if err != nil {
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+		
+		var statuses []mastodonStatus
+		if err := json.Unmarshal(body, &statuses); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		
+		if len(statuses) == 0 {
+			break // No more favorites to fetch
+		}
+		
+		// Check if we should continue fetching based on age criteria
+		shouldContinue := false
+		for _, status := range statuses {
+			// Add to our list
+			allFavoriteIDs = append(allFavoriteIDs, status.ID)
+			
+			// Check if any favorite in this batch matches the age criteria
+			if options.MaxAge != nil && time.Now().Sub(status.CreatedAt) > *options.MaxAge {
+				shouldContinue = true
+			}
+			if options.BeforeDate != nil && status.CreatedAt.Before(*options.BeforeDate) {
+				shouldContinue = true
+			}
+		}
+		
+		// Set maxID for next request
+		maxID = statuses[len(statuses)-1].ID
+		
+		if !shouldContinue {
+			break // No favorites match age criteria, stop fetching
+		}
+	}
+	
+	return allFavoriteIDs, nil
 }
 
