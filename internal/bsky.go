@@ -904,6 +904,7 @@ func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) 
 func (c *BlueskyClient) fetchAllRepostPosts(session *atpSessionResponse, options PruneOptions) ([]Post, error) {
 	var allRepostPosts []Post
 	cursor := ""
+	previousCursor := ""
 	batchSize := 100
 	
 	for {
@@ -986,8 +987,13 @@ func (c *BlueskyClient) fetchAllRepostPosts(session *atpSessionResponse, options
 			}
 		}
 		
-		// Update cursor for next request
-		cursor = listResponse.Cursor
+		// Update cursor for next request with infinite loop protection
+		newCursor := listResponse.Cursor
+		if newCursor == previousCursor && newCursor != "" {
+			break // Prevent infinite loop from duplicate cursors
+		}
+		previousCursor = cursor
+		cursor = newCursor
 		
 		if cursor == "" || !shouldContinue {
 			break // No more pages or no reposts match age criteria
@@ -1001,6 +1007,7 @@ func (c *BlueskyClient) fetchAllRepostPosts(session *atpSessionResponse, options
 func (c *BlueskyClient) fetchAllLikedPosts(session *atpSessionResponse, options PruneOptions) ([]Post, error) {
 	var allLikedPosts []Post
 	cursor := ""
+	previousCursor := ""
 	batchSize := 100
 	
 	for {
@@ -1083,8 +1090,13 @@ func (c *BlueskyClient) fetchAllLikedPosts(session *atpSessionResponse, options 
 			}
 		}
 		
-		// Update cursor for next request
-		cursor = listResponse.Cursor
+		// Update cursor for next request with infinite loop protection
+		newCursor := listResponse.Cursor
+		if newCursor == previousCursor && newCursor != "" {
+			break // Prevent infinite loop from duplicate cursors
+		}
+		previousCursor = cursor
+		cursor = newCursor
 		
 		if cursor == "" || !shouldContinue {
 			break // No more pages or no likes match age criteria

@@ -888,6 +888,7 @@ func (c *MastodonClient) fetchAllFavoriteIDs(instanceURL string, creds *Credenti
 	c.ensureAuthenticated(creds, instanceURL)
 	var allFavoriteIDs []string
 	maxID := ""
+	previousMaxID := ""
 	batchSize := 100
 	
 	for {
@@ -945,8 +946,13 @@ func (c *MastodonClient) fetchAllFavoriteIDs(instanceURL string, creds *Credenti
 			}
 		}
 		
-		// Set maxID for next request
-		maxID = statuses[len(statuses)-1].ID
+		// Set maxID for next request with infinite loop protection
+		newMaxID := statuses[len(statuses)-1].ID
+		if newMaxID == previousMaxID {
+			break // Prevent infinite loop - API returned same results
+		}
+		previousMaxID = maxID
+		maxID = newMaxID
 		
 		if !shouldContinue {
 			break // No favorites match age criteria, stop fetching
