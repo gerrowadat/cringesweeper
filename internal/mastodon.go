@@ -883,50 +883,6 @@ func (c *MastodonClient) fetchAccountInfo(instanceURL, accountID string, creds *
 	return &account, nil
 }
 
-// fetchFavoriteIDs fetches IDs of posts that the user has favorited
-func (c *MastodonClient) fetchFavoriteIDs(instanceURL string, creds *Credentials, limit int) ([]string, error) {
-	c.ensureAuthenticated(creds, instanceURL)
-	favoritesURL := fmt.Sprintf("%s/api/v1/favourites", instanceURL)
-
-	params := url.Values{}
-	params.Add("limit", strconv.Itoa(limit))
-
-	fullURL := fmt.Sprintf("%s?%s", favoritesURL, params.Encode())
-
-	req, err := c.authenticatedClient.CreateRequest("GET", fullURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.authenticatedClient.DoRequest(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var statuses []mastodonStatus
-	if err := json.Unmarshal(body, &statuses); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	var favoriteIDs []string
-	for _, status := range statuses {
-		favoriteIDs = append(favoriteIDs, status.ID)
-	}
-
-	return favoriteIDs, nil
-}
-
 // fetchAllFavoriteIDs fetches ALL favorited posts using pagination based on age criteria
 func (c *MastodonClient) fetchAllFavoriteIDs(instanceURL string, creds *Credentials, options PruneOptions) ([]string, error) {
 	c.ensureAuthenticated(creds, instanceURL)
