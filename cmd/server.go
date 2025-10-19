@@ -821,10 +821,9 @@ func runPruneWithMetrics(client internal.SocialClient, username string, options 
 
 // runContinuousPruneForServer runs continuous pruning with accurate success counting (server version of performContinuousPruningWithResult)
 func runContinuousPruneForServer(client internal.SocialClient, username string, options internal.PruneOptions) (*internal.PruneResult, error) {
-	// For server mode, we want to actually perform deletions (not dry-run)
+	// For server mode, respect the user's dry-run setting
 	// and only count posts that were successfully processed
 	serverOptions := options
-	serverOptions.DryRun = false // Ensure we actually perform operations
 	
 	log.Debug().Str("platform", client.GetPlatformName()).Msg("Starting prune operation for server")
 	

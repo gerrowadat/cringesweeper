@@ -351,11 +351,47 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 		return nil, fmt.Errorf("failed to authenticate with Bluesky: %w. This may indicate invalid credentials or DID resolution issues", err)
 	}
 
-	// Fetch user's posts (we'd need to fetch more than 10 for real pruning)
-	posts, err := c.FetchUserPosts(username, 100) // Fetch more posts for pruning
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch posts: %w", err)
+	// Fetch ALL user's posts using pagination to ensure we process posts older than 60 days
+	var allPosts []Post
+	cursor := ""
+	batchSize := 100
+	
+	for {
+		posts, nextCursor, err := c.FetchUserPostsPaginated(username, batchSize, cursor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch posts: %w", err)
+		}
+		
+		if len(posts) == 0 {
+			break // No more posts to fetch
+		}
+		
+		allPosts = append(allPosts, posts...)
+		
+		// Check if we should continue fetching based on age criteria
+		shouldContinue := false
+		if options.MaxAge != nil || options.BeforeDate != nil {
+			for _, post := range posts {
+				// If any post in this batch matches the age criteria, continue fetching
+				if options.MaxAge != nil && time.Now().Sub(post.CreatedAt) > *options.MaxAge {
+					shouldContinue = true
+					break
+				}
+				if options.BeforeDate != nil && post.CreatedAt.Before(*options.BeforeDate) {
+					shouldContinue = true
+					break
+				}
+			}
+		}
+		
+		if nextCursor == "" || !shouldContinue {
+			break // No more pages or no posts match age criteria
+		}
+		
+		cursor = nextCursor
 	}
+	
+	posts := allPosts
 
 	// If user wants to unlike posts, also fetch their liked posts
 	if options.UnlikePosts {
