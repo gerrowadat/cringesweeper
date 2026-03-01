@@ -59,6 +59,10 @@ jobs:
             VERSION=${{ github.event.release.tag_name }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ github.event.release.created_at }}
-          # Cache layers in the registry to speed up subsequent builds
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          # Disable provenance attestations — ghcr.io returns 403 on the extra
+          # manifest pushes they generate when combined with multi-platform builds
+          provenance: false
+          # Use GitHub Actions cache instead of a registry cache tag, avoiding
+          # an extra push that can also trigger 403s on first-time package creation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
