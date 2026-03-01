@@ -1,5 +1,5 @@
-# Build stage
-FROM golang:1.24-alpine AS builder
+# Build stage — always run on the host platform so Go cross-compiles without QEMU
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -16,13 +16,15 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build arguments for version information
+# Build arguments for version information and cross-compilation target
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
-# Build the application with version information
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# Build the application with version information, cross-compiling for the target platform
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -a -installsuffix cgo \
     -ldflags "-X github.com/gerrowadat/cringesweeper/internal.Version=${VERSION} \
               -X github.com/gerrowadat/cringesweeper/internal.Commit=${COMMIT} \
