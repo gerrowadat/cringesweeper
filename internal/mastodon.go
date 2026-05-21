@@ -534,29 +534,13 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 		posts := c.convertStatusesToPosts(statuses, instanceURL, creds)
 
 		if len(posts) == 0 {
-			break // No more posts to fetch
+			break
 		}
 
 		allPosts = append(allPosts, posts...)
 
-		// Check if we should continue fetching based on age criteria
-		shouldContinue := false
-		if options.MaxAge != nil || options.BeforeDate != nil {
-			for _, post := range posts {
-				// If any post in this batch matches the age criteria, continue fetching
-				if options.MaxAge != nil && time.Now().Sub(post.CreatedAt) > *options.MaxAge {
-					shouldContinue = true
-					break
-				}
-				if options.BeforeDate != nil && post.CreatedAt.Before(*options.BeforeDate) {
-					shouldContinue = true
-					break
-				}
-			}
-		}
-
-		if nextCursor == "" || !shouldContinue {
-			break // No more pages or no posts match age criteria
+		if nextCursor == "" {
+			break
 		}
 
 		cursor = nextCursor
@@ -742,28 +726,13 @@ func (c *MastodonClient) unlikePost(creds *Credentials, postID string) error {
 	return nil
 }
 
-// unreblogPost unreblogs (unshares) a Mastodon post
+// unreblogPost removes a reblog by deleting the reblog status directly.
+// post.ID is the reblog action's own status ID (status.ID from the API), not the
+// original post's ID. DELETE on that status ID removes the boost.
+// The /unreblog endpoint would require the original post's ID, but we don't store
+// that separately, so we use DELETE which is equivalent.
 func (c *MastodonClient) unreblogPost(creds *Credentials, postID string) error {
-	c.ensureAuthenticated(creds, creds.Instance)
-	url := fmt.Sprintf("%s/api/v1/statuses/%s/unreblog", creds.Instance, postID)
-
-	req, err := c.authenticatedClient.CreateRequest("POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.authenticatedClient.DoRequest(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
+	return c.deletePost(creds, postID)
 }
 
 // determinePostType determines the type of Mastodon post
