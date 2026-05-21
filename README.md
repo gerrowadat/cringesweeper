@@ -190,6 +190,7 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 - `--preserve-pinned`: Don't delete pinned posts
 - `--unlike-posts`: Unlike posts instead of deleting them
 - `--unshare-reposts`: Unshare/unrepost instead of deleting reposts
+- `--exclude-replies`: Skip replies when pruning (by default replies are pruned)
 - `--continue`: Continue searching and processing posts until no more match the criteria
 - `--rate-limit-delay string`: Delay between API requests to respect rate limits (default: 60s for Mastodon, 1s for Bluesky)
 - `--dry-run`: Show what would be deleted without actually deleting
@@ -228,6 +229,9 @@ providing gentler cleanup options. Supports continuous processing to handle enti
 
 # Unshare reposts instead of deleting them
 ./cringesweeper prune --max-post-age=30d --unshare-reposts --dry-run
+
+# Skip replies when pruning (keep your reply threads intact)
+./cringesweeper prune --max-post-age=30d --exclude-replies --dry-run
 
 # Combined approach: unlike liked posts, unshare reposts, delete the rest
 ./cringesweeper prune --max-post-age=6m --unlike-posts --unshare-reposts --dry-run
