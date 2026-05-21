@@ -55,10 +55,10 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 	creds, authErr := GetCredentialsForPlatform("mastodon")
 	if authErr == nil && ValidateCredentials(creds) == nil {
 		// Use authenticated fetch for viewer interaction data
-		statuses, err = c.fetchUserStatusesAuthenticated(instanceURL, accountID, limit, creds)
+		statuses, err = c.fetchUserStatusesAuthenticated(instanceURL, accountID, limit, creds, false)
 	} else {
 		// Use public fetch without viewer data
-		statuses, err = c.fetchUserStatuses(instanceURL, accountID, limit)
+		statuses, err = c.fetchUserStatuses(instanceURL, accountID, limit, false)
 		creds = nil // Ensure no credentials used for public fetch
 	}
 
@@ -66,7 +66,11 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 		return nil, fmt.Errorf("failed to fetch statuses: %w", err)
 	}
 
-	// Convert to generic Post format
+	return c.convertStatusesToPosts(statuses, instanceURL, creds), nil
+}
+
+// convertStatusesToPosts converts a slice of mastodonStatus to Post, enriching replies with author info.
+func (c *MastodonClient) convertStatusesToPosts(statuses []mastodonStatus, instanceURL string, creds *Credentials) []Post {
 	var posts []Post
 	for _, status := range statuses {
 		post := Post{
@@ -92,7 +96,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 		// Handle reblogs/reposts
 		if status.Reblog != nil {
 			post.Type = PostTypeRepost
-			// IMPORTANT: For reblogs, post.ID should be the reblog status ID (for unrebogging)
+			// IMPORTANT: For reblogs, post.ID should be the reblog status ID (for unreblogging)
 			// status.ID is the reblog action ID, status.Reblog.ID is the original post ID
 			post.ID = status.ID // This is the reblog action ID we need to unreblog
 			post.OriginalAuthor = status.Reblog.Account.DisplayName
@@ -129,8 +133,7 @@ func (c *MastodonClient) FetchUserPosts(username string, limit int) ([]Post, err
 
 		posts = append(posts, post)
 	}
-
-	return posts, nil
+	return posts
 }
 
 // FetchUserPostsPaginated retrieves posts with pagination support using max_id
@@ -152,10 +155,10 @@ func (c *MastodonClient) FetchUserPostsPaginated(username string, limit int, cur
 	creds, authErr := GetCredentialsForPlatform("mastodon")
 	if authErr == nil && ValidateCredentials(creds) == nil {
 		// Use authenticated fetch for viewer interaction data
-		statuses, nextCursor, err = c.fetchUserStatusesPaginated(instanceURL, accountID, limit, cursor, creds)
+		statuses, nextCursor, err = c.fetchUserStatusesPaginated(instanceURL, accountID, limit, cursor, creds, false)
 	} else {
 		// Use public fetch without viewer data
-		statuses, nextCursor, err = c.fetchUserStatusesPaginatedPublic(instanceURL, accountID, limit, cursor)
+		statuses, nextCursor, err = c.fetchUserStatusesPaginatedPublic(instanceURL, accountID, limit, cursor, false)
 		creds = nil // Ensure no credentials used for public fetch
 	}
 
@@ -163,79 +166,15 @@ func (c *MastodonClient) FetchUserPostsPaginated(username string, limit int, cur
 		return nil, "", fmt.Errorf("failed to fetch statuses: %w", err)
 	}
 
-	// Convert to generic Post format (same logic as FetchUserPosts)
-	var posts []Post
-	for _, status := range statuses {
-		post := Post{
-			ID:        status.ID,
-			Author:    status.Account.DisplayName,
-			Handle:    status.Account.Acct,
-			Content:   c.stripHTML(status.Content),
-			CreatedAt: status.CreatedAt,
-			URL:       status.URL,
-			Type:      c.determinePostType(status),
-			Platform:  "mastodon",
-
-			// Engagement metrics
-			RepostCount: status.ReblogsCount,
-			LikeCount:   status.FavouritesCount,
-			ReplyCount:  status.RepliesCount,
-
-			// Viewer interaction status
-			IsLikedByUser: status.Favourited != nil && *status.Favourited,
-			IsPinned:      status.Pinned != nil && *status.Pinned,
-		}
-
-		// Handle reblogs/reposts
-		if status.Reblog != nil {
-			post.Type = PostTypeRepost
-			// IMPORTANT: For reblogs, post.ID should be the reblog status ID (for unrebogging)
-			// status.ID is the reblog action ID, status.Reblog.ID is the original post ID
-			post.ID = status.ID // This is the reblog action ID we need to unreblog
-			post.OriginalAuthor = status.Reblog.Account.DisplayName
-			post.OriginalHandle = status.Reblog.Account.Acct
-			post.Content = c.stripHTML(status.Reblog.Content)
-			// Create embedded original post
-			post.OriginalPost = &Post{
-				ID:        status.Reblog.ID, // Original post ID
-				Author:    status.Reblog.Account.DisplayName,
-				Handle:    status.Reblog.Account.Acct,
-				Content:   c.stripHTML(status.Reblog.Content),
-				CreatedAt: status.Reblog.CreatedAt,
-				URL:       status.Reblog.URL,
-				Type:      PostTypeOriginal,
-				Platform:  "mastodon",
-			}
-		}
-
-		// Handle replies
-		if status.InReplyToID != nil {
-			post.Type = PostTypeReply
-			post.InReplyToID = *status.InReplyToID
-			if status.InReplyToAccountID != nil {
-				// Fetch reply author information
-				if replyAccount, err := c.fetchAccountInfo(instanceURL, *status.InReplyToAccountID, creds); err == nil {
-					post.InReplyToAuthor = replyAccount.DisplayName
-					if post.InReplyToAuthor == "" {
-						post.InReplyToAuthor = replyAccount.Acct
-					}
-				}
-				// Continue silently if account fetch fails to avoid disrupting the main operation
-			}
-		}
-
-		posts = append(posts, post)
-	}
-
-	return posts, nextCursor, nil
+	return c.convertStatusesToPosts(statuses, instanceURL, creds), nextCursor, nil
 }
 
-func (c *MastodonClient) fetchUserStatusesPaginatedPublic(instanceURL, accountID string, limit int, maxID string) ([]mastodonStatus, string, error) {
+func (c *MastodonClient) fetchUserStatusesPaginatedPublic(instanceURL, accountID string, limit int, maxID string, excludeReplies bool) ([]mastodonStatus, string, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
 
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
-	params.Add("exclude_replies", "true")
+	params.Add("exclude_replies", strconv.FormatBool(excludeReplies))
 	// Include reblogs so we can manage the user's own reblog actions
 	params.Add("exclude_reblogs", "false")
 	
@@ -279,12 +218,12 @@ func (c *MastodonClient) fetchUserStatusesPaginatedPublic(instanceURL, accountID
 	return statuses, nextCursor, nil
 }
 
-func (c *MastodonClient) fetchUserStatusesPaginated(instanceURL, accountID string, limit int, maxID string, creds *Credentials) ([]mastodonStatus, string, error) {
+func (c *MastodonClient) fetchUserStatusesPaginated(instanceURL, accountID string, limit int, maxID string, creds *Credentials, excludeReplies bool) ([]mastodonStatus, string, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
 
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
-	params.Add("exclude_replies", "true")
+	params.Add("exclude_replies", strconv.FormatBool(excludeReplies))
 	// Include reblogs so we can manage the user's own reblog actions
 	params.Add("exclude_reblogs", "false")
 	
@@ -420,12 +359,12 @@ func (c *MastodonClient) getAccountID(instanceURL, acct string) (string, error) 
 }
 
 // fetchUserStatuses gets statuses for an account ID
-func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit int) ([]mastodonStatus, error) {
+func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit int, excludeReplies bool) ([]mastodonStatus, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
 
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
-	params.Add("exclude_replies", "true")
+	params.Add("exclude_replies", strconv.FormatBool(excludeReplies))
 	// Include reblogs so we can manage the user's own reblog actions
 	params.Add("exclude_reblogs", "false")
 
@@ -459,12 +398,12 @@ func (c *MastodonClient) fetchUserStatuses(instanceURL, accountID string, limit 
 }
 
 // fetchUserStatusesAuthenticated gets statuses with viewer interaction data
-func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID string, limit int, creds *Credentials) ([]mastodonStatus, error) {
+func (c *MastodonClient) fetchUserStatusesAuthenticated(instanceURL, accountID string, limit int, creds *Credentials, excludeReplies bool) ([]mastodonStatus, error) {
 	statusesURL := fmt.Sprintf("%s/api/v1/accounts/%s/statuses", instanceURL, accountID)
 
 	params := url.Values{}
 	params.Add("limit", strconv.Itoa(limit))
-	params.Add("exclude_replies", "true")
+	params.Add("exclude_replies", strconv.FormatBool(excludeReplies))
 	// Include reblogs so we can manage the user's own reblog actions
 	params.Add("exclude_reblogs", "false")
 
@@ -569,29 +508,37 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	// Parse username to get instance URL
-	instanceURL, _, err := c.parseUsername(username)
+	// Parse username to get instance URL and account
+	instanceURL, acct, err := c.parseUsername(username)
 	if err != nil {
 		return nil, fmt.Errorf("invalid username format: %w", err)
 	}
 
-	// Fetch ALL user's posts using pagination to ensure we process posts older than 60 days
+	accountID, err := c.getAccountID(instanceURL, acct)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	// Fetch ALL user's posts using pagination to ensure we process posts older than 60 days.
+	// Use the private fetch directly so options.ExcludeReplies is honoured.
 	var allPosts []Post
 	cursor := ""
 	batchSize := 100
-	
+
 	for {
-		posts, nextCursor, err := c.FetchUserPostsPaginated(username, batchSize, cursor)
+		statuses, nextCursor, err := c.fetchUserStatusesPaginated(instanceURL, accountID, batchSize, cursor, creds, options.ExcludeReplies)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch posts: %w", err)
 		}
-		
+
+		posts := c.convertStatusesToPosts(statuses, instanceURL, creds)
+
 		if len(posts) == 0 {
 			break // No more posts to fetch
 		}
-		
+
 		allPosts = append(allPosts, posts...)
-		
+
 		// Check if we should continue fetching based on age criteria
 		shouldContinue := false
 		if options.MaxAge != nil || options.BeforeDate != nil {
@@ -607,11 +554,11 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 				}
 			}
 		}
-		
+
 		if nextCursor == "" || !shouldContinue {
 			break // No more pages or no posts match age criteria
 		}
-		
+
 		cursor = nextCursor
 	}
 	
@@ -648,6 +595,11 @@ func (c *MastodonClient) PrunePosts(username string, options PruneOptions) (*Pru
 	now := time.Now()
 
 	for _, post := range posts {
+		// Skip replies if requested
+		if options.ExcludeReplies && post.Type == PostTypeReply {
+			continue
+		}
+
 		shouldProcess := false
 		preserveReason := ""
 

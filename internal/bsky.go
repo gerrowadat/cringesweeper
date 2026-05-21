@@ -422,6 +422,11 @@ func (c *BlueskyClient) PrunePosts(username string, options PruneOptions) (*Prun
 	now := time.Now()
 
 	for _, post := range posts {
+		// Skip replies if requested
+		if options.ExcludeReplies && post.Type == PostTypeReply {
+			continue
+		}
+
 		shouldProcess := false
 		preserveReason := ""
 

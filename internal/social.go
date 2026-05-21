@@ -65,6 +65,7 @@ type PruneOptions struct {
 	PreservePinned   bool           `json:"preserve_pinned"`       // Don't delete pinned posts
 	UnlikePosts      bool           `json:"unlike_posts"`          // Unlike posts instead of deleting them
 	UnshareReposts   bool           `json:"unshare_reposts"`       // Unshare/unrepost instead of deleting reposts
+	ExcludeReplies   bool           `json:"exclude_replies"`        // Skip replies when pruning across all platforms (default: false, replies are pruned)
 	DryRun           bool           `json:"dry_run"`               // Only show what would be deleted
 	RateLimitDelay   time.Duration  `json:"rate_limit_delay"`      // Delay between API requests to respect rate limits
 }
