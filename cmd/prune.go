@@ -42,6 +42,7 @@ permanent and cannot be undone. Requires authentication for the target platform.
 		preservePinned, _ := cmd.Flags().GetBool("preserve-pinned")
 		unlikePosts, _ := cmd.Flags().GetBool("unlike-posts")
 		unshareReposts, _ := cmd.Flags().GetBool("unshare-reposts")
+		excludeReplies, _ := cmd.Flags().GetBool("exclude-replies")
 		continueUntilEnd, _ := cmd.Flags().GetBool("continue")
 		maxAgeStr, _ := cmd.Flags().GetString("max-post-age")
 		beforeDateStr, _ := cmd.Flags().GetString("before-date")
@@ -141,6 +142,7 @@ permanent and cannot be undone. Requires authentication for the target platform.
 				PreservePinned:   preservePinned,
 				UnlikePosts:      unlikePosts,
 				UnshareReposts:   unshareReposts,
+				ExcludeReplies:   excludeReplies,
 				DryRun:           dryRun,
 				RateLimitDelay:   rateLimitDelay,
 			}
@@ -460,6 +462,7 @@ func init() {
 	pruneCmd.Flags().Bool("preserve-pinned", false, "Don't delete pinned posts")
 	pruneCmd.Flags().Bool("unlike-posts", false, "Unlike posts instead of deleting them")
 	pruneCmd.Flags().Bool("unshare-reposts", false, "Unshare/unrepost instead of deleting reposts")
+	pruneCmd.Flags().Bool("exclude-replies", false, "Skip replies when pruning (by default replies are pruned)")
 	pruneCmd.Flags().Bool("continue", false, "Continue searching and processing posts until no more match the criteria")
 	pruneCmd.Flags().Bool("dry-run", false, "Show what would be deleted without actually deleting")
 	pruneCmd.Flags().String("rate-limit-delay", "", "Delay between API requests to respect rate limits (default: 60s for Mastodon, 1s for Bluesky)")

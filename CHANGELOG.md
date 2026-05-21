@@ -98,6 +98,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backward compatibility with single-platform flag syntax
 - Default platform fallback behavior
 
-## [0.0.2] and earlier
 
 For changes prior to v0.1.0, please refer to the git commit history.
