@@ -559,7 +559,7 @@ func (c *BlueskyClient) ensureValidSession(creds *Credentials) (*atpSessionRespo
 	
 	// If we don't have a session or credentials changed, create new session
 	if c.session == nil || c.sessionManager.HasCredentialsChanged(creds) {
-		if c.sessionManager.HasCredentialsChanged(creds) {
+		if c.session != nil && c.sessionManager.HasCredentialsChanged(creds) {
 			logger.Debug().Msg("Credentials changed, creating new Bluesky session")
 			fmt.Printf("🔄 Credentials changed, creating new Bluesky session...\n")
 		} else {
@@ -635,13 +635,13 @@ func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
 	// Try to parse actual expiration from refreshed JWT, fall back to 24 hours
 	logger := WithPlatform("bluesky")
 	if expTime, err := c.parseJWTExpiration(refreshedSession.AccessJwt); err == nil {
-		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, &Credentials{})
+		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, c.sessionManager.credentials)
 		logger.Debug().Time("expires_at", expTime).Msg("Session refreshed with parsed expiration")
 		fmt.Printf("✅ Session refreshed, expires at %s\n", expTime.Format("15:04:05"))
 	} else {
 		// Fallback to default 24 hours
 		expTime := time.Now().Add(24 * time.Hour)
-		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, &Credentials{})
+		c.sessionManager.UpdateSession(refreshedSession.AccessJwt, refreshedSession.RefreshJwt, expTime, c.sessionManager.credentials)
 		logger.Debug().Time("expires_at", expTime).Msg("Session refreshed with default 24h expiration")
 		fmt.Printf("✅ Session refreshed with default 24h expiration\n")
 	}
