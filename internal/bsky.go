@@ -16,6 +16,8 @@ import (
 type BlueskyClient struct {
 	sessionManager *SessionManager
 	session        *atpSessionResponse
+	publicBaseURL  string // override for testing; defaults to https://public.api.bsky.app
+	atpBaseURL     string // override for testing; defaults to https://bsky.social
 }
 
 // NewBlueskyClient creates a new Bluesky client
@@ -23,6 +25,20 @@ func NewBlueskyClient() *BlueskyClient {
 	return &BlueskyClient{
 		sessionManager: NewSessionManager("bluesky"),
 	}
+}
+
+func (c *BlueskyClient) getPublicBaseURL() string {
+	if c.publicBaseURL != "" {
+		return c.publicBaseURL
+	}
+	return "https://public.api.bsky.app"
+}
+
+func (c *BlueskyClient) getATPBaseURL() string {
+	if c.atpBaseURL != "" {
+		return c.atpBaseURL
+	}
+	return "https://bsky.social"
 }
 
 // GetPlatformName returns the platform name
@@ -78,7 +94,7 @@ func (c *BlueskyClient) FetchUserPostsPaginated(username string, limit int, curs
 }
 
 func (c *BlueskyClient) fetchBlueskyPostsPaginated(username string, limit int, cursor string) ([]blueskyPost, string, error) {
-	baseURL := "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed"
+	baseURL := c.getPublicBaseURL() + "/xrpc/app.bsky.feed.getAuthorFeed"
 	params := url.Values{}
 	params.Add("actor", username)
 	params.Add("limit", fmt.Sprintf("%d", limit))
@@ -496,7 +512,7 @@ func (c *BlueskyClient) refreshSession() (*atpSessionResponse, error) {
 		return nil, fmt.Errorf("no valid refresh token available")
 	}
 
-	refreshURL := "https://bsky.social/xrpc/com.atproto.server.refreshSession"
+	refreshURL := c.getATPBaseURL() + "/xrpc/com.atproto.server.refreshSession"
 
 	req, err := http.NewRequest("POST", refreshURL, nil)
 	if err != nil {
@@ -616,7 +632,7 @@ func (c *BlueskyClient) createNewSession(creds *Credentials) (*atpSessionRespons
 
 // createSession authenticates with AT Protocol and returns access token
 func (c *BlueskyClient) createSession(creds *Credentials) (*atpSessionResponse, error) {
-	sessionURL := "https://bsky.social/xrpc/com.atproto.server.createSession"
+	sessionURL := c.getATPBaseURL() + "/xrpc/com.atproto.server.createSession"
 
 	sessionData := map[string]string{
 		"identifier": creds.Username,
@@ -683,8 +699,8 @@ func (c *BlueskyClient) deleteAtpRecord(creds *Credentials, uri string) error {
 		return fmt.Errorf("DID mismatch: URI DID %s does not match authenticated user DID %s", did, session.DID)
 	}
 
-	atpClient := NewAuthenticatedHTTPClient(session.AccessJwt, "https://bsky.social", 30*time.Second)
-	return ExecuteDeleteRequest(atpClient, "https://bsky.social/xrpc/com.atproto.repo.deleteRecord", DeleteRecordRequest{
+	atpClient := NewAuthenticatedHTTPClient(session.AccessJwt, c.getATPBaseURL(), 30*time.Second)
+	return ExecuteDeleteRequest(atpClient, c.getATPBaseURL()+"/xrpc/com.atproto.repo.deleteRecord", DeleteRecordRequest{
 		Repo:       session.DID,
 		Collection: collection,
 		RKey:       rkey,
@@ -709,7 +725,7 @@ func (c *BlueskyClient) validatePostURI(postURI string, userDID string) error {
 
 // fetchLikedPosts fetches posts that the user has liked
 func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) ([]Post, error) {
-	listURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords"
+	listURL := c.getATPBaseURL() + "/xrpc/com.atproto.repo.listRecords"
 
 	params := url.Values{}
 	params.Add("repo", session.DID)
@@ -779,7 +795,7 @@ func (c *BlueskyClient) fetchLikedPosts(session *atpSessionResponse, limit int) 
 // fetchAllATPRecords fetches all records of a given collection via paginated listRecords,
 // building Posts with the given type and content prefix. Used for likes and reposts.
 func (c *BlueskyClient) fetchAllATPRecords(session *atpSessionResponse, options PruneOptions, collection string, postType PostType, contentPrefix string) ([]Post, error) {
-	atpClient := NewAuthenticatedHTTPClient(session.AccessJwt, "https://bsky.social", 30*time.Second)
+	atpClient := NewAuthenticatedHTTPClient(session.AccessJwt, c.getATPBaseURL(), 30*time.Second)
 
 	var allPosts []Post
 	cursor := ""
@@ -805,7 +821,7 @@ func (c *BlueskyClient) fetchAllATPRecords(session *atpSessionResponse, options 
 		if cursor != "" {
 			params.Add("cursor", cursor)
 		}
-		fullURL := "https://bsky.social/xrpc/com.atproto.repo.listRecords?" + params.Encode()
+		fullURL := c.getATPBaseURL() + "/xrpc/com.atproto.repo.listRecords?" + params.Encode()
 
 		req, err := atpClient.CreateRequest("GET", fullURL, nil)
 		if err != nil {

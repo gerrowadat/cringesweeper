@@ -2,6 +2,9 @@ package internal
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -456,5 +459,305 @@ func TestPost_JSONSerialization(t *testing.T) {
 	}
 	if unmarshaledPost.IsLikedByUser != post.IsLikedByUser {
 		t.Errorf("IsLikedByUser mismatch after JSON round-trip: expected %v, got %v", post.IsLikedByUser, unmarshaledPost.IsLikedByUser)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SessionManager
+// ---------------------------------------------------------------------------
+
+func TestSessionManager_IsSessionValid(t *testing.T) {
+	sm := NewSessionManager("bluesky")
+
+	t.Run("empty session is invalid", func(t *testing.T) {
+		if sm.IsSessionValid() {
+			t.Error("expected invalid session when no token set")
+		}
+	})
+
+	t.Run("valid future expiry", func(t *testing.T) {
+		sm.accessToken = "tok"
+		sm.sessionExpiry = time.Now().Add(1 * time.Hour)
+		if !sm.IsSessionValid() {
+			t.Error("expected valid session")
+		}
+	})
+
+	t.Run("expired token is invalid", func(t *testing.T) {
+		sm.accessToken = "tok"
+		sm.sessionExpiry = time.Now().Add(-1 * time.Hour)
+		if sm.IsSessionValid() {
+			t.Error("expected invalid session for expired token")
+		}
+	})
+
+	t.Run("token expiring within 5 minutes is invalid", func(t *testing.T) {
+		sm.accessToken = "tok"
+		sm.sessionExpiry = time.Now().Add(3 * time.Minute)
+		if sm.IsSessionValid() {
+			t.Error("expected invalid session for near-expiry token")
+		}
+	})
+}
+
+func TestSessionManager_GettersAndClear(t *testing.T) {
+	sm := NewSessionManager("bluesky")
+	creds := &Credentials{Username: "u", AppPassword: "p"}
+	sm.UpdateSession("access", "refresh", time.Now().Add(1*time.Hour), creds)
+
+	if sm.GetAccessToken() != "access" {
+		t.Errorf("GetAccessToken: want %q, got %q", "access", sm.GetAccessToken())
+	}
+	if sm.GetRefreshToken() != "refresh" {
+		t.Errorf("GetRefreshToken: want %q, got %q", "refresh", sm.GetRefreshToken())
+	}
+
+	sm.ClearSession()
+	if sm.GetAccessToken() != "" {
+		t.Error("expected empty access token after ClearSession")
+	}
+	if sm.GetRefreshToken() != "" {
+		t.Error("expected empty refresh token after ClearSession")
+	}
+	if sm.credentials != nil {
+		t.Error("expected nil credentials after ClearSession")
+	}
+}
+
+func TestSessionManager_HasCredentialsChanged(t *testing.T) {
+	t.Run("bluesky: nil credentials returns true", func(t *testing.T) {
+		sm := NewSessionManager("bluesky")
+		if !sm.HasCredentialsChanged(&Credentials{Username: "u", AppPassword: "p"}) {
+			t.Error("expected true when credentials are nil")
+		}
+	})
+
+	t.Run("bluesky: same credentials returns false", func(t *testing.T) {
+		sm := NewSessionManager("bluesky")
+		creds := &Credentials{Username: "u", AppPassword: "p"}
+		sm.UpdateSession("tok", "ref", time.Now().Add(1*time.Hour), creds)
+		if sm.HasCredentialsChanged(creds) {
+			t.Error("expected false for unchanged credentials")
+		}
+	})
+
+	t.Run("bluesky: different username returns true", func(t *testing.T) {
+		sm := NewSessionManager("bluesky")
+		sm.UpdateSession("tok", "ref", time.Now().Add(1*time.Hour), &Credentials{Username: "a", AppPassword: "p"})
+		if !sm.HasCredentialsChanged(&Credentials{Username: "b", AppPassword: "p"}) {
+			t.Error("expected true when username changes")
+		}
+	})
+
+	t.Run("mastodon: same credentials returns false", func(t *testing.T) {
+		sm := NewSessionManager("mastodon")
+		creds := &Credentials{AccessToken: "tok", Instance: "https://mastodon.social"}
+		sm.UpdateSession("tok", "", time.Now().Add(1*time.Hour), creds)
+		if sm.HasCredentialsChanged(creds) {
+			t.Error("expected false for unchanged mastodon credentials")
+		}
+	})
+
+	t.Run("mastodon: different instance returns true", func(t *testing.T) {
+		sm := NewSessionManager("mastodon")
+		sm.UpdateSession("tok", "", time.Now().Add(1*time.Hour), &Credentials{AccessToken: "t", Instance: "https://a.social"})
+		if !sm.HasCredentialsChanged(&Credentials{AccessToken: "t", Instance: "https://b.social"}) {
+			t.Error("expected true when instance changes")
+		}
+	})
+
+	t.Run("unknown platform always returns true", func(t *testing.T) {
+		sm := NewSessionManager("unknown")
+		sm.UpdateSession("tok", "", time.Now().Add(1*time.Hour), &Credentials{})
+		if !sm.HasCredentialsChanged(&Credentials{}) {
+			t.Error("expected true for unknown platform")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// ExtractPostIDFromURI / ValidateURIOwnership
+// ---------------------------------------------------------------------------
+
+func TestExtractPostIDFromURI(t *testing.T) {
+	tests := []struct {
+		uri  string
+		want string
+	}{
+		{"at://did:plc:abc/app.bsky.feed.post/rkey1", "rkey1"},
+		{"https://example.com/post/abc123", "abc123"},
+		{"", ""},
+		{"noslash", ""},
+	}
+	for _, tt := range tests {
+		if got := ExtractPostIDFromURI(tt.uri); got != tt.want {
+			t.Errorf("ExtractPostIDFromURI(%q) = %q, want %q", tt.uri, got, tt.want)
+		}
+	}
+}
+
+func TestValidateURIOwnership(t *testing.T) {
+	tests := []struct {
+		uri     string
+		owner   string
+		wantErr bool
+	}{
+		{"at://did:plc:abc/coll/rkey", "did:plc:abc", false},
+		{"at://did:plc:abc/coll/rkey", "did:plc:other", true},
+		{"at://short", "did:plc:abc", true},
+	}
+	for _, tt := range tests {
+		err := ValidateURIOwnership(tt.uri, tt.owner)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateURIOwnership(%q, %q): wantErr=%v, got %v", tt.uri, tt.owner, tt.wantErr, err)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RateLimiter
+// ---------------------------------------------------------------------------
+
+func TestRateLimiter_ZeroDelay(t *testing.T) {
+	rl := NewRateLimiter(0)
+	start := time.Now()
+	rl.Wait()
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("zero-delay Wait took too long: %v", elapsed)
+	}
+}
+
+func TestRateLimiter_NonZeroDelay(t *testing.T) {
+	rl := NewRateLimiter(10 * time.Millisecond)
+	start := time.Now()
+	rl.Wait()
+	if elapsed := time.Since(start); elapsed < 10*time.Millisecond {
+		t.Errorf("Wait returned too fast: %v", elapsed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParseErrorResponse
+// ---------------------------------------------------------------------------
+
+func TestParseErrorResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"NotFound"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	parseErr := ParseErrorResponse(resp)
+	if parseErr == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(parseErr.Error(), "404") {
+		t.Errorf("expected status code in error, got: %v", parseErr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExecuteDeleteRequest (via httptest)
+// ---------------------------------------------------------------------------
+
+func TestExecuteDeleteRequest_Success(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["repo"] != "did:plc:x" || body["collection"] != "app.bsky.feed.post" || body["rkey"] != "rkey1" {
+			t.Errorf("unexpected body: %v", body)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewAuthenticatedHTTPClient("tok", srv.URL, 5*time.Second)
+	err := ExecuteDeleteRequest(client, srv.URL+"/deleteRecord", DeleteRecordRequest{
+		Repo:       "did:plc:x",
+		Collection: "app.bsky.feed.post",
+		RKey:       "rkey1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("delete endpoint not called")
+	}
+}
+
+func TestExecuteDeleteRequest_Failure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := NewAuthenticatedHTTPClient("tok", srv.URL, 5*time.Second)
+	err := ExecuteDeleteRequest(client, srv.URL+"/deleteRecord", DeleteRecordRequest{Repo: "r", Collection: "c", RKey: "k"})
+	if err == nil {
+		t.Error("expected error on 403 response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExecuteListRequest (via httptest)
+// ---------------------------------------------------------------------------
+
+func TestExecuteListRequest_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") == "" {
+			t.Error("expected limit param")
+		}
+		w.Write([]byte(`{"records":[]}`))
+	}))
+	defer srv.Close()
+
+	client := NewAuthenticatedHTTPClient("tok", srv.URL, 5*time.Second)
+	body, err := ExecuteListRequest(client, APIListRequest{URL: srv.URL + "/list", Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("expected non-empty body")
+	}
+}
+
+func TestExecuteListRequest_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := NewAuthenticatedHTTPClient("tok", srv.URL, 5*time.Second)
+	_, err := ExecuteListRequest(client, APIListRequest{URL: srv.URL + "/list", Limit: 10})
+	if err == nil {
+		t.Error("expected error on 500 response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateHTTPClient
+// ---------------------------------------------------------------------------
+
+func TestCreateHTTPClient(t *testing.T) {
+	c := CreateHTTPClient(HTTPClientConfig{Timeout: 5 * time.Second})
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestCreateHTTPClient_DefaultTimeout(t *testing.T) {
+	c := CreateHTTPClient(HTTPClientConfig{})
+	if c.Timeout != 30*time.Second {
+		t.Errorf("expected default timeout 30s, got %v", c.Timeout)
 	}
 }

@@ -1,7 +1,9 @@
 package internal
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,613 +14,671 @@ import (
 func TestNewBlueskyClient(t *testing.T) {
 	client := NewBlueskyClient()
 	if client == nil {
-		t.Error("NewBlueskyClient should return a non-nil client")
+		t.Fatal("NewBlueskyClient should return a non-nil client")
+	}
+	if client.sessionManager == nil {
+		t.Error("sessionManager should be initialised")
 	}
 }
 
 func TestBlueskyClient_GetPlatformName(t *testing.T) {
-	client := NewBlueskyClient()
-	expected := "Bluesky"
-	if name := client.GetPlatformName(); name != expected {
-		t.Errorf("Expected platform name %q, got %q", expected, name)
+	if name := NewBlueskyClient().GetPlatformName(); name != "Bluesky" {
+		t.Errorf("expected %q, got %q", "Bluesky", name)
 	}
 }
 
 func TestBlueskyClient_RequiresAuth(t *testing.T) {
-	client := NewBlueskyClient()
-	if !client.RequiresAuth() {
+	if !NewBlueskyClient().RequiresAuth() {
 		t.Error("Bluesky client should require authentication")
 	}
 }
 
+// ---------------------------------------------------------------------------
+// extractPostID
+// ---------------------------------------------------------------------------
+
 func TestExtractPostID(t *testing.T) {
 	tests := []struct {
-		name     string
 		uri      string
 		expected string
 	}{
-		{
-			name:     "valid URI",
-			uri:      "at://did:plc:abc123/app.bsky.feed.post/xyz789",
-			expected: "xyz789",
-		},
-		{
-			name:     "URI with longer post ID",
-			uri:      "at://did:plc:longerid123/app.bsky.feed.post/verylongpostid456",
-			expected: "verylongpostid456",
-		},
-		{
-			name:     "empty URI",
-			uri:      "",
-			expected: "",
-		},
-		{
-			name:     "URI without slashes",
-			uri:      "invalid-uri-format",
-			expected: "",
-		},
-		{
-			name:     "URI ending with slash",
-			uri:      "at://did:plc:abc123/app.bsky.feed.post/",
-			expected: "",
-		},
+		{"at://did:plc:abc123/app.bsky.feed.post/xyz789", "xyz789"},
+		{"at://did:plc:x/app.bsky.feed.post/verylongid", "verylongid"},
+		{"", ""},
+		{"invalid-uri-format", ""},
+		{"at://did:plc:abc123/app.bsky.feed.post/", ""},
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractPostID(tt.uri)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
-			}
-		})
+		if got := extractPostID(tt.uri); got != tt.expected {
+			t.Errorf("extractPostID(%q) = %q, want %q", tt.uri, got, tt.expected)
+		}
 	}
 }
 
-func TestBlueskyClient_DeterminePostType(t *testing.T) {
-	client := NewBlueskyClient()
+// ---------------------------------------------------------------------------
+// determinePostType
+// ---------------------------------------------------------------------------
 
+func TestBlueskyClient_DeterminePostType(t *testing.T) {
+	c := NewBlueskyClient()
 	tests := []struct {
 		name     string
 		post     blueskyPost
 		expected PostType
 	}{
 		{
-			name: "original post",
-			post: blueskyPost{
-				Record: blueskyRecord{
-					Type: "app.bsky.feed.post",
-				},
-			},
-			expected: PostTypeOriginal,
+			"original post",
+			blueskyPost{Record: blueskyRecord{Type: "app.bsky.feed.post"}},
+			PostTypeOriginal,
 		},
 		{
-			name: "repost",
-			post: blueskyPost{
-				Record: blueskyRecord{
-					Type: "app.bsky.feed.repost",
-				},
-			},
-			expected: PostTypeRepost,
+			"repost",
+			blueskyPost{Record: blueskyRecord{Type: "app.bsky.feed.repost"}},
+			PostTypeRepost,
 		},
 		{
-			name: "reply",
-			post: blueskyPost{
-				Record: blueskyRecord{
-					Type: "app.bsky.feed.post",
-					Reply: &blueskyReply{
-						Parent: blueskyPostRef{URI: "at://parent"},
-						Root:   blueskyPostRef{URI: "at://root"},
-					},
-				},
-			},
-			expected: PostTypeReply,
+			"reply",
+			blueskyPost{Record: blueskyRecord{
+				Type:  "app.bsky.feed.post",
+				Reply: &blueskyReply{Parent: blueskyPostRef{URI: "at://parent"}},
+			}},
+			PostTypeReply,
 		},
 		{
-			name: "unknown type",
-			post: blueskyPost{
-				Record: blueskyRecord{
-					Type: "app.bsky.unknown.type",
-				},
-			},
-			expected: PostTypeOriginal,
+			"unknown type defaults to original",
+			blueskyPost{Record: blueskyRecord{Type: "app.bsky.unknown"}},
+			PostTypeOriginal,
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := client.determinePostType(tt.post)
-			if result != tt.expected {
-				t.Errorf("Expected %v, got %v", tt.expected, result)
+			if got := c.determinePostType(tt.post); got != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, got)
 			}
 		})
 	}
 }
 
-func TestTruncateContent(t *testing.T) {
+// ---------------------------------------------------------------------------
+// convertBskyPost — the main new abstraction
+// ---------------------------------------------------------------------------
+
+func TestBlueskyClient_ConvertBskyPost(t *testing.T) {
+	c := NewBlueskyClient()
+	now := time.Now().Truncate(time.Second)
+
+	t.Run("original post fields", func(t *testing.T) {
+		p := blueskyPost{
+			URI: "at://did:plc:abc/app.bsky.feed.post/rkey1",
+			Author: blueskyAuthor{
+				DID:         "did:plc:abc",
+				Handle:      "user.bsky.social",
+				DisplayName: "Test User",
+			},
+			Record: blueskyRecord{
+				Type:      "app.bsky.feed.post",
+				Text:      "hello",
+				CreatedAt: now,
+			},
+			LikeCount:   3,
+			RepostCount: 1,
+			ReplyCount:  2,
+		}
+		got := c.convertBskyPost(p)
+		if got.ID != p.URI {
+			t.Errorf("ID: want %q, got %q", p.URI, got.ID)
+		}
+		if got.Author != "Test User" {
+			t.Errorf("Author: want %q, got %q", "Test User", got.Author)
+		}
+		if got.Handle != "user.bsky.social" {
+			t.Errorf("Handle: want %q, got %q", "user.bsky.social", got.Handle)
+		}
+		if got.Content != "hello" {
+			t.Errorf("Content: want %q, got %q", "hello", got.Content)
+		}
+		if got.Platform != "bluesky" {
+			t.Errorf("Platform: want %q, got %q", "bluesky", got.Platform)
+		}
+		if got.LikeCount != 3 || got.RepostCount != 1 || got.ReplyCount != 2 {
+			t.Errorf("metrics wrong: likes=%d reposts=%d replies=%d", got.LikeCount, got.RepostCount, got.ReplyCount)
+		}
+		if got.Type != PostTypeOriginal {
+			t.Errorf("Type: want %v, got %v", PostTypeOriginal, got.Type)
+		}
+		wantURL := "https://bsky.app/profile/user.bsky.social/post/rkey1"
+		if got.URL != wantURL {
+			t.Errorf("URL: want %q, got %q", wantURL, got.URL)
+		}
+	})
+
+	t.Run("empty DisplayName falls back to Handle", func(t *testing.T) {
+		p := blueskyPost{
+			URI:    "at://did:plc:x/app.bsky.feed.post/r",
+			Author: blueskyAuthor{Handle: "handle.bsky.social"},
+			Record: blueskyRecord{Type: "app.bsky.feed.post", CreatedAt: now},
+		}
+		got := c.convertBskyPost(p)
+		if got.Author != "handle.bsky.social" {
+			t.Errorf("want handle fallback, got %q", got.Author)
+		}
+	})
+
+	t.Run("viewer data liked", func(t *testing.T) {
+		likeURI := "at://like"
+		p := blueskyPost{
+			URI:        "at://did:plc:x/app.bsky.feed.post/r",
+			Author:     blueskyAuthor{Handle: "h"},
+			Record:     blueskyRecord{Type: "app.bsky.feed.post", CreatedAt: now},
+			ViewerData: &blueskyViewerData{Like: &likeURI},
+		}
+		if !c.convertBskyPost(p).IsLikedByUser {
+			t.Error("expected IsLikedByUser=true")
+		}
+	})
+
+	t.Run("viewer data not liked", func(t *testing.T) {
+		p := blueskyPost{
+			URI:        "at://did:plc:x/app.bsky.feed.post/r",
+			Author:     blueskyAuthor{Handle: "h"},
+			Record:     blueskyRecord{Type: "app.bsky.feed.post", CreatedAt: now},
+			ViewerData: &blueskyViewerData{Like: nil},
+		}
+		if c.convertBskyPost(p).IsLikedByUser {
+			t.Error("expected IsLikedByUser=false")
+		}
+	})
+
+	t.Run("nil viewer data", func(t *testing.T) {
+		p := blueskyPost{
+			URI:    "at://did:plc:x/app.bsky.feed.post/r",
+			Author: blueskyAuthor{Handle: "h"},
+			Record: blueskyRecord{Type: "app.bsky.feed.post", CreatedAt: now},
+		}
+		if c.convertBskyPost(p).IsLikedByUser {
+			t.Error("expected IsLikedByUser=false when ViewerData is nil")
+		}
+	})
+
+	t.Run("pinned post", func(t *testing.T) {
+		p := blueskyPost{
+			URI:      "at://did:plc:x/app.bsky.feed.post/r",
+			Author:   blueskyAuthor{Handle: "h"},
+			Record:   blueskyRecord{Type: "app.bsky.feed.post", CreatedAt: now},
+			IsPinned: true,
+		}
+		if !c.convertBskyPost(p).IsPinned {
+			t.Error("expected IsPinned=true")
+		}
+	})
+
+	t.Run("reply sets InReplyToID", func(t *testing.T) {
+		p := blueskyPost{
+			URI:    "at://did:plc:x/app.bsky.feed.post/r",
+			Author: blueskyAuthor{Handle: "h"},
+			Record: blueskyRecord{
+				Type:      "app.bsky.feed.post",
+				CreatedAt: now,
+				Reply:     &blueskyReply{Parent: blueskyPostRef{URI: "at://parent/uri"}},
+			},
+		}
+		got := c.convertBskyPost(p)
+		if got.Type != PostTypeReply {
+			t.Errorf("Type: want reply, got %v", got.Type)
+		}
+		if got.InReplyToID != "at://parent/uri" {
+			t.Errorf("InReplyToID: want %q, got %q", "at://parent/uri", got.InReplyToID)
+		}
+	})
+
+	t.Run("repost type", func(t *testing.T) {
+		p := blueskyPost{
+			URI:    "at://did:plc:x/app.bsky.feed.repost/r",
+			Author: blueskyAuthor{Handle: "h"},
+			Record: blueskyRecord{Type: "app.bsky.feed.repost", CreatedAt: now},
+		}
+		if c.convertBskyPost(p).Type != PostTypeRepost {
+			t.Error("expected PostTypeRepost")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// validatePostURI
+// ---------------------------------------------------------------------------
+
+func TestBlueskyClient_ValidatePostURI(t *testing.T) {
+	c := NewBlueskyClient()
 	tests := []struct {
-		name     string
-		content  string
-		maxLen   int
-		expected string
+		name    string
+		uri     string
+		did     string
+		wantErr bool
 	}{
-		{
-			name:     "short content",
-			content:  "Hello world",
-			maxLen:   20,
-			expected: "Hello world",
-		},
-		{
-			name:     "exact length",
-			content:  "Hello",
-			maxLen:   5,
-			expected: "Hello",
-		},
-		{
-			name:     "needs truncation",
-			content:  "This is a very long message that needs truncation",
-			maxLen:   10,
-			expected: "This is...",
-		},
-		{
-			name:     "content with newlines",
-			content:  "Line 1\nLine 2\nLine 3",
-			maxLen:   15,
-			expected: "Line 1 Line ...",
-		},
-		{
-			name:     "empty content",
-			content:  "",
-			maxLen:   10,
-			expected: "",
-		},
-		{
-			name:     "zero max length",
-			content:  "Hello",
-			maxLen:   0,
-			expected: "...",
-		},
+		{"valid", "at://did:plc:abc/app.bsky.feed.post/rkey", "did:plc:abc", false},
+		{"DID mismatch", "at://did:plc:abc/app.bsky.feed.post/rkey", "did:plc:other", true},
+		{"too few parts", "at://short", "did:plc:abc", true},
+		{"empty URI", "", "did:plc:abc", true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := TruncateContent(tt.content, tt.maxLen)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
+			err := c.validatePostURI(tt.uri, tt.did)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("wantErr=%v, got err=%v", tt.wantErr, err)
 			}
 		})
 	}
 }
 
-func TestBlueskyClient_FetchUserPosts(t *testing.T) {
-	// Mock server for testing API calls
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "/xrpc/app.bsky.feed.getAuthorFeed") {
-			t.Errorf("Unexpected API path: %s", r.URL.Path)
-		}
+// ---------------------------------------------------------------------------
+// parseJWTExpiration
+// ---------------------------------------------------------------------------
 
-		// Check query parameters
-		username := r.URL.Query().Get("actor")
-		if username == "" {
-			t.Error("Actor parameter should be provided")
-		}
+func TestBlueskyClient_ParseJWTExpiration(t *testing.T) {
+	c := NewBlueskyClient()
 
-		limit := r.URL.Query().Get("limit")
-		if limit == "" {
-			t.Error("Limit parameter should be provided")
+	t.Run("valid JWT with future expiry", func(t *testing.T) {
+		future := time.Now().Add(1 * time.Hour).Unix()
+		payload := fmt.Sprintf(`{"exp":%d}`, future)
+		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
+		token := "header." + encoded + ".sig"
+		exp, err := c.parseJWTExpiration(token)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
+		if exp.Unix() != future {
+			t.Errorf("exp mismatch: want %d, got %d", future, exp.Unix())
+		}
+	})
 
-		// Mock response
-		response := blueskyEnhancedFeedResponse{
-			Feed: []struct {
+	t.Run("malformed JWT returns error", func(t *testing.T) {
+		if _, err := c.parseJWTExpiration("not-a-jwt"); err == nil {
+			t.Error("expected error for malformed JWT")
+		}
+	})
+
+	t.Run("JWT with non-JSON payload returns error", func(t *testing.T) {
+		encoded := base64.RawURLEncoding.EncodeToString([]byte("notjson"))
+		if _, err := c.parseJWTExpiration("h." + encoded + ".s"); err == nil {
+			t.Error("expected error for non-JSON payload")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// FetchUserPosts / FetchUserPostsPaginated (via httptest)
+// ---------------------------------------------------------------------------
+
+func makeFeedServer(t *testing.T, posts []blueskyPost) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "getAuthorFeed") {
+			http.Error(w, "wrong path", http.StatusNotFound)
+			return
+		}
+		feed := blueskyEnhancedFeedResponse{}
+		for _, p := range posts {
+			entry := struct {
 				Post       blueskyPost        `json:"post"`
 				ViewerData *blueskyViewerData `json:"viewer,omitempty"`
 				PinnedPost bool               `json:"pinnedPost,omitempty"`
-			}{
-				{
-					Post: blueskyPost{
-						URI: "at://did:plc:test123/app.bsky.feed.post/abc123",
-						CID: "bafyreid123",
-						Author: blueskyAuthor{
-							DID:         "did:plc:test123",
-							Handle:      "test.bsky.social",
-							DisplayName: "Test User",
-						},
-						Record: blueskyRecord{
-							Type:      "app.bsky.feed.post",
-							Text:      "Hello world!",
-							CreatedAt: time.Now(),
-						},
-						LikeCount:   5,
-						RepostCount: 2,
-						ReplyCount:  1,
-					},
-					ViewerData: &blueskyViewerData{
-						Like: nil,
-					},
-				},
-			},
+			}{Post: p}
+			feed.Feed = append(feed.Feed, entry)
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		json.NewEncoder(w).Encode(feed)
 	}))
-	defer server.Close()
+}
 
-	// Note: This test demonstrates the structure but can't easily test the real implementation
-	// without dependency injection or interface mocking for the HTTP client
-	t.Run("fetch posts structure", func(t *testing.T) {
-		client := NewBlueskyClient()
+func TestBlueskyClient_FetchUserPosts(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	srv := makeFeedServer(t, []blueskyPost{
+		{
+			URI:    "at://did:plc:u/app.bsky.feed.post/r1",
+			Author: blueskyAuthor{Handle: "u.bsky.social", DisplayName: "U"},
+			Record: blueskyRecord{Type: "app.bsky.feed.post", Text: "hi", CreatedAt: now},
+		},
+	})
+	defer srv.Close()
 
-		// In a real test, we'd need to inject the mock server URL
-		// For now, we just test that the client implements the interface
-		var _ SocialClient = client
+	c := NewBlueskyClient()
+	c.publicBaseURL = srv.URL
 
-		// Test that it doesn't panic with invalid input
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("FetchUserPosts panicked: %v", r)
+	posts, err := c.FetchUserPosts("u.bsky.social", 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(posts) == 0 {
+		t.Fatal("expected at least one post")
+	}
+	if posts[0].Content != "hi" {
+		t.Errorf("Content: want %q, got %q", "hi", posts[0].Content)
+	}
+	if posts[0].Platform != "bluesky" {
+		t.Errorf("Platform: want bluesky, got %q", posts[0].Platform)
+	}
+}
+
+func TestBlueskyClient_FetchUserPostsPaginated_Cursor(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	cursor := "next-page-cursor"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		feed := blueskyEnhancedFeedResponse{
+			Cursor: &cursor,
+		}
+		entry := struct {
+			Post       blueskyPost        `json:"post"`
+			ViewerData *blueskyViewerData `json:"viewer,omitempty"`
+			PinnedPost bool               `json:"pinnedPost,omitempty"`
+		}{Post: blueskyPost{
+			URI:    "at://did:plc:u/app.bsky.feed.post/r1",
+			Author: blueskyAuthor{Handle: "u"},
+			Record: blueskyRecord{Type: "app.bsky.feed.post", Text: "paginated", CreatedAt: now},
+		}}
+		feed.Feed = append(feed.Feed, entry)
+		json.NewEncoder(w).Encode(feed)
+	}))
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.publicBaseURL = srv.URL
+
+	posts, nextCursor, err := c.FetchUserPostsPaginated("u", 10, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(posts) == 0 {
+		t.Fatal("expected posts")
+	}
+	if nextCursor != cursor {
+		t.Errorf("nextCursor: want %q, got %q", cursor, nextCursor)
+	}
+}
+
+func TestBlueskyClient_FetchUserPosts_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.publicBaseURL = srv.URL
+
+	_, err := c.FetchUserPosts("u", 10)
+	if err == nil {
+		t.Error("expected error on 500 response")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// deleteAtpRecord (via httptest)
+// ---------------------------------------------------------------------------
+
+func makeDeleteServer(t *testing.T, wantDID string) (*httptest.Server, *bool) {
+	t.Helper()
+	called := new(bool)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "deleteRecord") {
+			*called = true
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["repo"] != wantDID {
+				http.Error(w, "wrong repo", http.StatusBadRequest)
+				return
 			}
-		}()
-	})
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.Contains(r.URL.Path, "createSession") {
+			json.NewEncoder(w).Encode(atpSessionResponse{
+				AccessJwt: "tok", RefreshJwt: "ref", Handle: "h", DID: wantDID,
+			})
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	return srv, called
 }
 
-func TestBlueskyClient_PrunePosts(t *testing.T) {
-	client := NewBlueskyClient()
+func TestBlueskyClient_DeleteAtpRecord(t *testing.T) {
+	const did = "did:plc:testuser"
+	srv, called := makeDeleteServer(t, did)
+	defer srv.Close()
 
-	// Test that the method exists and handles invalid credentials gracefully
-	t.Run("prune posts without credentials", func(t *testing.T) {
-		options := PruneOptions{
-			MaxAge: func() *time.Duration { d := 30 * 24 * time.Hour; return &d }(),
-			DryRun: true,
-		}
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+	// Pre-populate a session so ensureValidSession reuses it
+	c.session = &atpSessionResponse{AccessJwt: "tok", RefreshJwt: "ref", Handle: "h", DID: did}
+	c.sessionManager.UpdateSession("tok", "ref", time.Now().Add(1*time.Hour), &Credentials{Username: "u", AppPassword: "p"})
 
-		// This should fail due to missing credentials
-		result, err := client.PrunePosts("test.bsky.social", options)
+	uri := fmt.Sprintf("at://%s/app.bsky.feed.post/rkey1", did)
+	creds := &Credentials{Username: "u", AppPassword: "p"}
 
-		if err == nil {
-			t.Error("Expected error when no credentials are available")
-		}
-
-		if result != nil {
-			t.Error("Expected nil result when credentials are missing")
-		}
-	})
+	if err := c.deleteAtpRecord(creds, uri); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !*called {
+		t.Error("deleteRecord endpoint was not called")
+	}
 }
 
-func TestBlueskyPost_Conversion(t *testing.T) {
-	// Test the conversion logic from blueskyPost to generic Post
+func TestBlueskyClient_DeleteAtpRecord_DIDMismatch(t *testing.T) {
+	const did = "did:plc:testuser"
+	srv, _ := makeDeleteServer(t, did)
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+	c.session = &atpSessionResponse{AccessJwt: "tok", RefreshJwt: "ref", Handle: "h", DID: did}
+	c.sessionManager.UpdateSession("tok", "ref", time.Now().Add(1*time.Hour), &Credentials{Username: "u", AppPassword: "p"})
+
+	uri := "at://did:plc:DIFFERENT/app.bsky.feed.post/rkey1"
+	if err := c.deleteAtpRecord(&Credentials{Username: "u", AppPassword: "p"}, uri); err == nil {
+		t.Error("expected DID mismatch error")
+	}
+}
+
+func TestBlueskyClient_DeleteAtpRecord_InvalidURI(t *testing.T) {
+	c := NewBlueskyClient()
+	c.session = &atpSessionResponse{DID: "did:plc:x"}
+	c.sessionManager.UpdateSession("tok", "ref", time.Now().Add(1*time.Hour), &Credentials{Username: "u", AppPassword: "p"})
+
+	if err := c.deleteAtpRecord(&Credentials{Username: "u", AppPassword: "p"}, "at://short"); err == nil {
+		t.Error("expected error for short URI")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fetchAllATPRecords (via httptest) — tests pagination, age cutoff, cursor dedup
+// ---------------------------------------------------------------------------
+
+type atpRecord struct {
+	URI   string `json:"uri"`
+	Value struct {
+		Subject   struct{ URI string `json:"uri"` } `json:"subject"`
+		CreatedAt time.Time                         `json:"createdAt"`
+	} `json:"value"`
+}
+
+func makeListRecordsServer(t *testing.T, pages [][]atpRecord) *httptest.Server {
+	t.Helper()
+	call := 0
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "listRecords") {
+			http.Error(w, "not found", 404)
+			return
+		}
+		type response struct {
+			Records []atpRecord `json:"records"`
+			Cursor  string      `json:"cursor,omitempty"`
+		}
+		var resp response
+		if call < len(pages) {
+			resp.Records = pages[call]
+			if call+1 < len(pages) {
+				resp.Cursor = fmt.Sprintf("cursor-%d", call+1)
+			}
+		}
+		call++
+		json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+func makeSession(did string) *atpSessionResponse {
+	return &atpSessionResponse{AccessJwt: "tok", RefreshJwt: "ref", Handle: "h", DID: did}
+}
+
+func TestFetchAllATPRecords_SinglePage(t *testing.T) {
 	now := time.Now()
-	bskyPost := blueskyPost{
-		URI: "at://did:plc:test123/app.bsky.feed.post/abc123",
-		CID: "bafyreid123",
-		Author: blueskyAuthor{
-			DID:         "did:plc:test123",
-			Handle:      "test.bsky.social",
-			DisplayName: "Test User",
-		},
-		Record: blueskyRecord{
-			Type:      "app.bsky.feed.post",
-			Text:      "Hello world!",
-			CreatedAt: now,
-		},
-		LikeCount:   5,
-		RepostCount: 2,
-		ReplyCount:  1,
-		ViewerData: &blueskyViewerData{
-			Like: nil,
-		},
+	old := now.Add(-48 * time.Hour)
+	maxAge := 24 * time.Hour
+
+	rec := atpRecord{URI: "at://did:plc:x/app.bsky.feed.like/r1"}
+	rec.Value.Subject.URI = "at://original"
+	rec.Value.CreatedAt = old
+
+	srv := makeListRecordsServer(t, [][]atpRecord{{rec}})
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+	session := makeSession("did:plc:x")
+
+	opts := PruneOptions{MaxAge: &maxAge}
+	posts, err := c.fetchAllATPRecords(session, opts, "app.bsky.feed.like", PostTypeLike, "Liked: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	// Test conversion logic (this would be in FetchUserPosts)
-	post := Post{
-		ID:        bskyPost.URI,
-		Author:    bskyPost.Author.DisplayName,
-		Handle:    bskyPost.Author.Handle,
-		Content:   bskyPost.Record.Text,
-		CreatedAt: bskyPost.Record.CreatedAt,
-		Platform:  "bluesky",
-
-		RepostCount: bskyPost.RepostCount,
-		LikeCount:   bskyPost.LikeCount,
-		ReplyCount:  bskyPost.ReplyCount,
+	if len(posts) != 1 {
+		t.Fatalf("want 1 post, got %d", len(posts))
 	}
-
-	t.Run("post conversion", func(t *testing.T) {
-		if post.ID != bskyPost.URI {
-			t.Errorf("Expected ID %q, got %q", bskyPost.URI, post.ID)
-		}
-
-		if post.Author != bskyPost.Author.DisplayName {
-			t.Errorf("Expected Author %q, got %q", bskyPost.Author.DisplayName, post.Author)
-		}
-
-		if post.Handle != bskyPost.Author.Handle {
-			t.Errorf("Expected Handle %q, got %q", bskyPost.Author.Handle, post.Handle)
-		}
-
-		if post.Content != bskyPost.Record.Text {
-			t.Errorf("Expected Content %q, got %q", bskyPost.Record.Text, post.Content)
-		}
-
-		if post.Platform != "bluesky" {
-			t.Errorf("Expected Platform 'bluesky', got %q", post.Platform)
-		}
-
-		if post.LikeCount != bskyPost.LikeCount {
-			t.Errorf("Expected LikeCount %d, got %d", bskyPost.LikeCount, post.LikeCount)
-		}
-	})
-
-	t.Run("fallback author handling", func(t *testing.T) {
-		// Test when DisplayName is empty
-		bskyPostNoDisplay := bskyPost
-		bskyPostNoDisplay.Author.DisplayName = ""
-
-		expectedAuthor := bskyPost.Author.Handle
-		if bskyPostNoDisplay.Author.DisplayName == "" {
-			if expectedAuthor != bskyPost.Author.Handle {
-				t.Error("Should use Handle as fallback when DisplayName is empty")
-			}
-		}
-	})
-
-	t.Run("viewer interaction status", func(t *testing.T) {
-		// Test liked status
-		bskyPostLiked := bskyPost
-		likeURI := "at://like/uri"
-		bskyPostLiked.ViewerData = &blueskyViewerData{
-			Like: &likeURI,
-		}
-
-		isLiked := bskyPostLiked.ViewerData != nil && bskyPostLiked.ViewerData.Like != nil
-		if !isLiked {
-			t.Error("Should detect liked status when Like URI is present")
-		}
-
-		// Test not liked status
-		bskyPostNotLiked := bskyPost
-		bskyPostNotLiked.ViewerData = &blueskyViewerData{
-			Like: nil,
-		}
-
-		isNotLiked := bskyPostNotLiked.ViewerData != nil && bskyPostNotLiked.ViewerData.Like != nil
-		if isNotLiked {
-			t.Error("Should not detect liked status when Like URI is nil")
-		}
-	})
-}
-
-func TestBlueskyReplyHandling(t *testing.T) {
-	// Test reply detection and handling
-	replyPost := blueskyPost{
-		Record: blueskyRecord{
-			Type: "app.bsky.feed.post",
-			Text: "This is a reply",
-			Reply: &blueskyReply{
-				Parent: blueskyPostRef{
-					URI: "at://did:plc:parent/app.bsky.feed.post/parent123",
-					CID: "parentcid",
-				},
-				Root: blueskyPostRef{
-					URI: "at://did:plc:root/app.bsky.feed.post/root123",
-					CID: "rootcid",
-				},
-			},
-		},
+	if posts[0].Type != PostTypeLike {
+		t.Errorf("Type: want %v, got %v", PostTypeLike, posts[0].Type)
 	}
-
-	t.Run("reply detection", func(t *testing.T) {
-		client := NewBlueskyClient()
-		postType := client.determinePostType(replyPost)
-
-		if postType != PostTypeReply {
-			t.Errorf("Expected PostTypeReply, got %v", postType)
-		}
-	})
-
-	t.Run("reply parent URI extraction", func(t *testing.T) {
-		// Test logic for extracting parent URI (from FetchUserPosts conversion)
-		var inReplyToID string
-		if replyPost.Record.Reply != nil {
-			inReplyToID = replyPost.Record.Reply.Parent.URI
-		}
-
-		expectedParentURI := "at://did:plc:parent/app.bsky.feed.post/parent123"
-		if inReplyToID != expectedParentURI {
-			t.Errorf("Expected parent URI %q, got %q", expectedParentURI, inReplyToID)
-		}
-	})
-}
-
-func TestBlueskyRepostHandling(t *testing.T) {
-	// Test repost detection
-	repostPost := blueskyPost{
-		Record: blueskyRecord{
-			Type: "app.bsky.feed.repost",
-		},
-	}
-
-	t.Run("repost detection", func(t *testing.T) {
-		client := NewBlueskyClient()
-		postType := client.determinePostType(repostPost)
-
-		if postType != PostTypeRepost {
-			t.Errorf("Expected PostTypeRepost, got %v", postType)
-		}
-	})
-
-	t.Run("repost type override", func(t *testing.T) {
-		// Test logic from FetchUserPosts where repost type is set
-		postType := PostTypeOriginal // Initial value
-
-		if repostPost.Record.Type == "app.bsky.feed.repost" {
-			postType = PostTypeRepost
-		}
-
-		if postType != PostTypeRepost {
-			t.Errorf("Expected PostTypeRepost after override, got %v", postType)
-		}
-	})
-}
-
-func TestBlueskyURLGeneration(t *testing.T) {
-	tests := []struct {
-		name     string
-		handle   string
-		uri      string
-		expected string
-	}{
-		{
-			name:     "standard post URL",
-			handle:   "test.bsky.social",
-			uri:      "at://did:plc:test123/app.bsky.feed.post/abc123",
-			expected: "https://bsky.app/profile/test.bsky.social/post/abc123",
-		},
-		{
-			name:     "custom handle",
-			handle:   "alice.example.com",
-			uri:      "at://did:plc:alice456/app.bsky.feed.post/xyz789",
-			expected: "https://bsky.app/profile/alice.example.com/post/xyz789",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test URL generation logic from FetchUserPosts
-			postID := extractPostID(tt.uri)
-			url := "https://bsky.app/profile/" + tt.handle + "/post/" + postID
-
-			if url != tt.expected {
-				t.Errorf("Expected URL %q, got %q", tt.expected, url)
-			}
-		})
+	if posts[0].Content != "Liked: at://original" {
+		t.Errorf("Content: %q", posts[0].Content)
 	}
 }
 
-func TestBlueskySessionCreation(t *testing.T) {
-	// Mock server for session creation
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/xrpc/com.atproto.server.createSession" {
-			t.Errorf("Unexpected session path: %s", r.URL.Path)
-		}
+func TestFetchAllATPRecords_MultiPage(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-48 * time.Hour)
+	maxAge := 24 * time.Hour
 
-		if r.Method != "POST" {
-			t.Errorf("Expected POST method, got %s", r.Method)
-		}
+	makeRec := func(rkey string) atpRecord {
+		r := atpRecord{URI: "at://did:plc:x/app.bsky.feed.repost/" + rkey}
+		r.Value.Subject.URI = "at://orig"
+		r.Value.CreatedAt = old
+		return r
+	}
+	page1 := []atpRecord{makeRec("r1"), makeRec("r2")}
+	page2 := []atpRecord{makeRec("r3")}
 
-		// Mock successful session response
-		response := atpSessionResponse{
-			AccessJwt:  "mock.jwt.token",
-			RefreshJwt: "mock.refresh.token",
-			Handle:     "test.bsky.social",
-			DID:        "did:plc:test123",
-		}
+	srv := makeListRecordsServer(t, [][]atpRecord{page1, page2})
+	defer srv.Close()
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+
+	opts := PruneOptions{MaxAge: &maxAge}
+	posts, err := c.fetchAllATPRecords(makeSession("did:plc:x"), opts, "app.bsky.feed.repost", PostTypeRepost, "Reposted: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(posts) != 3 {
+		t.Errorf("want 3 posts across 2 pages, got %d", len(posts))
+	}
+}
+
+func TestFetchAllATPRecords_StopsWhenNoAgeCriteriaMatch(t *testing.T) {
+	// Records that are newer than MaxAge should not trigger continuation.
+	maxAge := 24 * time.Hour
+	recent := time.Now().Add(-1 * time.Hour) // within maxAge — should NOT trigger continue
+
+	rec := atpRecord{URI: "at://did:plc:x/app.bsky.feed.like/r1"}
+	rec.Value.Subject.URI = "at://orig"
+	rec.Value.CreatedAt = recent
+
+	srv := makeListRecordsServer(t, [][]atpRecord{{rec}})
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+
+	opts := PruneOptions{MaxAge: &maxAge}
+	posts, err := c.fetchAllATPRecords(makeSession("did:plc:x"), opts, "app.bsky.feed.like", PostTypeLike, "Liked: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Record is collected even though it doesn't match age criteria; pagination stops
+	if len(posts) != 1 {
+		t.Errorf("want 1 post, got %d", len(posts))
+	}
+}
+
+func TestFetchAllATPRecords_EmptyFirstPage(t *testing.T) {
+	srv := makeListRecordsServer(t, [][]atpRecord{{}})
+	defer srv.Close()
+
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
+
+	maxAge := 24 * time.Hour
+	posts, err := c.fetchAllATPRecords(makeSession("did:plc:x"), PruneOptions{MaxAge: &maxAge}, "app.bsky.feed.like", PostTypeLike, "Liked: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(posts) != 0 {
+		t.Errorf("want 0 posts, got %d", len(posts))
+	}
+}
+
+func TestFetchAllATPRecords_CursorDedupBreaksLoop(t *testing.T) {
+	// Server always returns the same cursor — must not loop forever.
+	const staleCursor = "stuck"
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		if call > 5 {
+			t.Error("pagination did not stop on duplicate cursor")
+		}
+		old := time.Now().Add(-48 * time.Hour)
+		maxAge := 24 * time.Hour
+		_ = maxAge
+		rec := atpRecord{URI: fmt.Sprintf("at://did:plc:x/app.bsky.feed.like/r%d", call)}
+		rec.Value.Subject.URI = "at://orig"
+		rec.Value.CreatedAt = old
+		type resp struct {
+			Records []atpRecord `json:"records"`
+			Cursor  string      `json:"cursor"`
+		}
+		json.NewEncoder(w).Encode(resp{Records: []atpRecord{rec}, Cursor: staleCursor})
 	}))
-	defer server.Close()
+	defer srv.Close()
 
-	t.Run("session creation structure", func(t *testing.T) {
-		// Test that we can structure session data correctly
-		sessionData := map[string]string{
-			"identifier": "test.bsky.social",
-			"password":   "test-app-password",
-		}
+	c := NewBlueskyClient()
+	c.atpBaseURL = srv.URL
 
-		jsonData, err := json.Marshal(sessionData)
-		if err != nil {
-			t.Errorf("Failed to marshal session data: %v", err)
-		}
+	maxAge := 24 * time.Hour
+	_, err := c.fetchAllATPRecords(makeSession("did:plc:x"), PruneOptions{MaxAge: &maxAge}, "app.bsky.feed.like", PostTypeLike, "Liked: ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
-		if len(jsonData) == 0 {
-			t.Error("Session data should not be empty")
-		}
+// ---------------------------------------------------------------------------
+// PrunePosts — credential path
+// ---------------------------------------------------------------------------
+
+func TestBlueskyClient_PrunePosts_NoCredentials(t *testing.T) {
+	result, err := NewBlueskyClient().PrunePosts("test.bsky.social", PruneOptions{
+		MaxAge: func() *time.Duration { d := 30 * 24 * time.Hour; return &d }(),
+		DryRun: true,
 	})
-}
-
-func TestBlueskyErrorHandling(t *testing.T) {
-	tests := []struct {
-		name           string
-		statusCode     int
-		responseBody   string
-		expectedErrMsg string
-	}{
-		{
-			name:           "404 not found",
-			statusCode:     404,
-			responseBody:   `{"error":"NotFound","message":"User not found"}`,
-			expectedErrMsg: "404",
-		},
-		{
-			name:           "401 unauthorized",
-			statusCode:     401,
-			responseBody:   `{"error":"Unauthorized","message":"Invalid credentials"}`,
-			expectedErrMsg: "401",
-		},
-		{
-			name:           "500 server error",
-			statusCode:     500,
-			responseBody:   `{"error":"InternalServerError","message":"Server error"}`,
-			expectedErrMsg: "500",
-		},
+	if err == nil {
+		t.Error("expected error when no credentials available")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test error handling logic that would be used in API calls
-			if tt.statusCode != http.StatusOK {
-				// This simulates the error checking in fetchBlueskyPosts
-				errorOccurred := true
-				if !errorOccurred {
-					t.Error("Should detect error for non-200 status codes")
-				}
-			}
-		})
-	}
-}
-
-func TestBlueskyAPIParameterValidation(t *testing.T) {
-	tests := []struct {
-		name     string
-		username string
-		limit    int
-		valid    bool
-	}{
-		{
-			name:     "valid parameters",
-			username: "test.bsky.social",
-			limit:    10,
-			valid:    true,
-		},
-		{
-			name:     "empty username",
-			username: "",
-			limit:    10,
-			valid:    false,
-		},
-		{
-			name:     "zero limit",
-			username: "test.bsky.social",
-			limit:    0,
-			valid:    false,
-		},
-		{
-			name:     "negative limit",
-			username: "test.bsky.social",
-			limit:    -1,
-			valid:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test parameter validation logic
-			isValid := tt.username != "" && tt.limit > 0
-
-			if isValid != tt.valid {
-				t.Errorf("Expected validity %v, got %v", tt.valid, isValid)
-			}
-		})
+	if result != nil {
+		t.Error("expected nil result when credentials missing")
 	}
 }
